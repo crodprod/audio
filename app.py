@@ -875,6 +875,6 @@ if __name__ == "__main__":
             name=flet_path,
             target=main,
             view=None,
-            port=8503,
+            port=8502,
             assets_dir="assets"
         )
