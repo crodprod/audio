@@ -522,8 +522,8 @@ def main(page: ft.Page):
                 on_click=sender
             )
 
-            directories = [d for d in os.listdir(os.path.join(project_folder, "music")) if
-                           os.path.isdir(os.path.join(os.path.join(project_folder, "music"), d))]
+            directories = [d for d in os.listdir('/home/pi/music/Sumstage/livemusic') if
+                           os.path.isdir(os.path.join('/home/pi/music/Sumstage/livemusic', d))]
             folders_list.controls.clear()
             if len(directories) > 0:
                 text = "Выберите папку, из которой необходимо играть музыку"
