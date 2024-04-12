@@ -7,7 +7,7 @@ import requests
 import subprocess
 
 from source.schedule_funcs import start_schedule
-from source.mixer_funcs import control, set_volume, play_start_sound, start_music_check
+from source.mixer_funcs import control, set_volume, play_start_sound, start_music_check, send_wss_data
 from source.functions import update_config_file, load_config_file
 import source.global_variables
 import flet as ft
@@ -136,6 +136,8 @@ def main(page: ft.Page):
     def sender(e: ft.ControlEvent):
         if e.control.data == "autoplay_changed":
             autoplay_checkbox_value_changed()
+        elif e.control.data == "transmit_changed":
+            transmit_checkbox_value_changed()
         else:
             change_screens(e.control.data)
 
@@ -209,6 +211,15 @@ def main(page: ft.Page):
         update_config_file(config_data)
         send_data()
 
+    def transmit_checkbox_value_changed():
+        value = transmit_checkbox.value
+        if value:
+            send_wss_data('activate')
+            open_classic_snackbar("Трансляция включена")
+        else:
+            send_wss_data('deactivate')
+            open_classic_snackbar("Трансляция выключена")
+        send_data()
     def autoplay_checkbox_value_changed():
         # Изменение автовоспроизведения
 
@@ -241,7 +252,10 @@ def main(page: ft.Page):
         return mp3_files
 
     def update_current_folder(e: ft.ControlEvent):
-        new_folder = os.path.join(project_folder, os.path.join("music", e.control.data))
+        if platform.system() == 'Windows':
+            new_folder = os.path.join("music", e.control.data)
+        else:
+            new_folder = os.path.join("/home/pi/music/Sumstage/livemusic", e.control.data)
         playlist = find_mp3_files(new_folder)
         if len(playlist) == 0:
             open_classic_snackbar("В папке нет музыки", ft.colors.RED)
@@ -699,6 +713,13 @@ def main(page: ft.Page):
         adaptive=True
     )
 
+    transmit_checkbox = ft.Checkbox(
+        label="Трансляция",
+        data="transmit_changed",
+        on_change=sender,
+        adaptive=True
+    )
+
     control_row = ft.Row(
         [
             btn_prev, btn_play, btn_pause, btn_next
@@ -745,6 +766,12 @@ def main(page: ft.Page):
             ft.Row(
                 [
                     autoplay_checkbocx
+                ],
+                alignment=ft.MainAxisAlignment.CENTER
+            ),
+            ft.Row(
+                [
+                    transmit_checkbox
                 ],
                 alignment=ft.MainAxisAlignment.CENTER
             ),
@@ -862,7 +889,6 @@ flet_path = os.getenv("FLET_PATH", DEFAULT_FLET_PATH)
 if __name__ == "__main__":
     play_start_sound("start")
     # start_check_update()
-    send_awake()
     start_music_check()
     start_schedule()
     if platform.system() == 'Windows':
@@ -871,6 +897,7 @@ if __name__ == "__main__":
             assets_dir='assets'
         )
     else:
+        send_awake()
         ft.app(
             name=flet_path,
             target=main,

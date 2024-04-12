@@ -1,6 +1,7 @@
 import json
 import threading
 import time
+import websocket
 
 from pygame import mixer
 from source.functions import update_config_file
@@ -32,18 +33,22 @@ def control(action):
                 config_data['current_track']['index'] -= 1
 
         update_config_file(config_data)
+        send_wss_data('/'.join(file_path.split("\\")[-2:]))
+        # print('/'.join(file_path.split("\\")[-2:]))
         mixer.music.load(filename=file_path)
         mixer.music.play(fade_ms=1000)
         print(f"LOADED AND PLAYING: {file_path}")
     elif action == "pause":
         if source.global_variables.AUTOPLAY:
             source.global_variables.AUTOPLAY = False
-        mixer.music.fadeout(3000)
+        mixer.music.fadeout(1000)
+        send_wss_data('pause')
         # mixer.music.load(config_data['current_track'])
         # time.sleep(10)
         # mixer.music.stop()
         print("PAUSED")
     elif action == "play":
+        send_wss_data('play')
         mixer.music.unpause()
         print("RESUMED")
 
@@ -62,6 +67,15 @@ def play_start_sound(sound_type: str):
     elif sound_type == "reboot":
         mixer.music.load("reboot_sound.mp3")
     mixer.music.play(fade_ms=1000)
+
+
+def send_wss_data(data):
+    try:
+        ws = websocket.create_connection("wss://8c2c-31-134-188-48.ngrok-free.app/")
+        ws.send(data)
+        ws.close()
+    except Exception as e:
+        print("Ошибка при отправке данных:", e)
 
 
 def auto_play():
