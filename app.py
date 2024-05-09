@@ -118,7 +118,7 @@ def main(page: ft.Page):
     }
 
     page.appbar = ft.AppBar(
-        title=ft.Text("Audio", size=20, weight=ft.FontWeight.W_400)
+        title=ft.Text("Audio", size=20, weight=ft.FontWeight.W_400),
     )
 
     screens_data = {
@@ -308,16 +308,16 @@ def main(page: ft.Page):
         page.scroll = screens_data[target]['scroll']
 
         clients = {
-            # 0: {
-            #     'name': 'sumstage',
-            #     'title': 'Летняя сцена',
-            #     'icon': ft.icons.SPEAKER
-            # },
-            # 1: {
-            #     'name': 'territory',
-            #     'title': 'Территория',
-            #     'icon': ft.icons.TERRAIN
-            # },
+            0: {
+                'name': 'sumstage',
+                'title': 'Летняя сцена',
+                'icon': ft.icons.SPEAKER
+            },
+            1: {
+                'name': 'territory',
+                'title': 'Территория',
+                'icon': ft.icons.TERRAIN
+            },
             2: {
                 'name': 'conference',
                 'title': 'Конференц-зал',
@@ -419,6 +419,7 @@ def main(page: ft.Page):
             if len(schedule) > 0:
                 col = ft.Column()
                 for index, el in enumerate(schedule):
+                    h, m = "0" * (2 - len(str(el['time']['hour']))) + f"{el['time']['hour']}", "0" * (2 - len(str(el['time']['min']))) + f"{el['time']['min']}"
                     col.controls.append(
                         ft.Card(
                             ft.Container(
@@ -428,14 +429,19 @@ def main(page: ft.Page):
                                             [
                                                 ft.Container(
                                                     content=ft.ListTile(
-                                                        title=ft.Text(f"{el['time']['hour']}:{el['time']['min']}", size=18, weight=ft.FontWeight.W_400),
-                                                        subtitle=ft.Text(action[el['action']]['title'], size=18)
+                                                        title=ft.Text(f"{h}:{m}", size=18, weight=ft.FontWeight.W_400),
+                                                        subtitle=ft.Text(action[el['action']]['title'], size=16)
                                                     ),
                                                     expand=True,
                                                     padding=ft.padding.only(left=-15)
                                                 ),
-                                                ft.IconButton(ft.icons.EDIT, on_click=edit_timer, data=index),
-                                                ft.IconButton(ft.icons.DELETE, ft.colors.RED, on_click=delete_timer, data=index),
+                                                ft.PopupMenuButton(
+                                                    items=[
+                                                        ft.FilledButton(text='Редактировать', icon=ft.icons.EDIT, on_click=edit_timer, data=index),
+                                                        ft.Divider(thickness=1),
+                                                        ft.FilledButton(text='Удалить', icon=ft.icons.DELETE, on_click=delete_timer, data=index),
+                                                    ]
+                                                ),
                                                 ft.Switch(value=el['active'], active_color=ft.colors.GREEN, on_change=change_timer_status, data=index)
                                             ]
                                         ),
@@ -450,7 +456,8 @@ def main(page: ft.Page):
                                 ),
                                 padding=15
                             ),
-                            elevation=5
+                            elevation=5,
+                            width=600
                         )
                     )
                 page.add(col)
@@ -467,6 +474,7 @@ def main(page: ft.Page):
 
             if listdir is not None:
                 col = ft.Column()
+                col.controls.append(ft.Text('Выберите папку с музыкой', size=18, weight=ft.FontWeight.W_400))
                 listdir = [dir for dir in listdir if ".txt" not in dir['name']]
                 for dir in listdir:
                     col.controls.append(
@@ -478,9 +486,10 @@ def main(page: ft.Page):
                                         ft.IconButton(ft.icons.ARROW_FORWARD_IOS, on_click=send_new_path, data={'client_id': client_id, 'path': dir['name']})
                                     ]
                                 ),
-                                padding=ft.padding.only(left=15, right=15)
+                                padding=15
                             ),
-                            elevation=5
+                            elevation=5,
+                            width=600
                         )
                     )
                 page.add(col)
@@ -500,8 +509,9 @@ def main(page: ft.Page):
                         location.controls[0].value = True
 
             timer_action_dd.value = cur_timer['action']
-            timer_time_btn.content.value = f"{cur_timer['time']['hour']}:{cur_timer['time']['min']}"
-            # timer_datepicker.da
+            h, m = "0" * (2 - len(str(cur_timer['time']['hour']))) + f"{cur_timer['time']['hour']}", "0" * (2 - len(str(cur_timer['time']['min']))) + f"{cur_timer['time']['min']}"
+            print(h, m)
+            timer_time_btn.content.value = f"{h}:{m}"
 
             col = ft.Column(
                 [
@@ -553,8 +563,10 @@ def main(page: ft.Page):
                         elevation=5,
                         width=600
                     ),
-                    ft.Row([ft.FilledTonalButton(text="Сохранить", icon=ft.icons.SAVE, on_click=update_timer, data=value)], alignment=ft.MainAxisAlignment.END)
-                ], alignment=ft.MainAxisAlignment.CENTER
+                    ft.Row([ft.FilledTonalButton(text="Сохранить", icon=ft.icons.SAVE, on_click=update_timer, data=value)], alignment=ft.MainAxisAlignment.END, width=600)
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                alignment=ft.MainAxisAlignment.CENTER
             )
 
             page.add(col)
