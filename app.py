@@ -60,7 +60,7 @@ def play_music():
         hour, minute = time.hour, time.minute
         if el['time']['hour'] == hour and el['time']['min'] == minute:
             for source in el['sources']:
-                send_data_to_ws(source, 'play')
+                send_data_to_ws(source, 'nexttrack')
 
 
 def stop_music():
@@ -121,6 +121,9 @@ def main(page: ft.Page):
         title=ft.Text("Audio", size=20, weight=ft.FontWeight.W_400),
     )
 
+    def goto_pick_folder(e: ft.ControlEvent):
+        change_screen("pick_folder", e.control.data)
+
     screens_data = {
         'audio_main': {
             'leading': None,
@@ -154,8 +157,9 @@ def main(page: ft.Page):
             ft.Container(
                 ft.Row(
                     [
-                        ft.IconButton(ft.icons.UPDATE, on_click=lambda _: change_screen("audio_main")),
-                        ft.ElevatedButton(icon=ft.icons.SCHEDULE, on_click=lambda _: change_screen('audio_schedule'), tooltip="Расписание", text="Расписание"),
+                        ft.IconButton(ft.icons.MULTITRACK_AUDIO, on_click=goto_pick_folder, data='all', tooltip="Синхронизация"),
+                        ft.IconButton(ft.icons.UPDATE, on_click=lambda _: change_screen("audio_main"), tooltip="Обновить"),
+                        ft.IconButton(icon=ft.icons.SCHEDULE, on_click=lambda _: change_screen('audio_schedule'), tooltip="Расписание"),
                     ]
                 ),
                 margin=ft.margin.only(right=10)
@@ -294,9 +298,6 @@ def main(page: ft.Page):
 
     def edit_timer(e: ft.ControlEvent):
         change_screen("edit_timer", e.control.data)
-
-    def goto_pick_folder(e: ft.ControlEvent):
-        change_screen("pick_folder", e.control.data)
 
     def change_screen(target: str, value=None):
         page.controls.clear()
@@ -613,11 +614,19 @@ def main(page: ft.Page):
         client_id, path = data['client_id'], data['path']
         loading_text.value = "Отправка"
         open_dialog(dialog_loading)
-        send_data_to_ws(
-            client=client_id,
-            action="setdir",
-            params=path
-        )
+        if client_id == 'all':
+            for cid in ['sumstage, territory, conference']:
+                send_data_to_ws(
+                    client=cid,
+                    action="setdir",
+                    params=path
+                )
+        else:
+            send_data_to_ws(
+                client=client_id,
+                action="setdir",
+                params=path
+            )
         close_dialog(dialog_loading)
         change_screen("audio_main")
 
