@@ -49,7 +49,7 @@ def send_data_to_ws(client: str, action: str, params=None):
         'action': action,
         'params': params
     }
-    print(data)
+    # print(data)
     ws.send(json.dumps(data))
 
 
@@ -166,7 +166,7 @@ def main(page: ft.Page):
             ft.Container(
                 ft.Row(
                     [
-                        ft.IconButton(ft.icons.ADD_CIRCLE, on_click=lambda _: print("new"), tooltip="Добавить"),
+                        # ft.IconButton(ft.icons.ADD_CIRCLE, on_click=lambda _: print("new"), tooltip="Добавить"),
                     ]
                 ),
                 margin=ft.margin.only(right=10)
@@ -175,59 +175,6 @@ def main(page: ft.Page):
         'pick_folder': None,
         'edit_timer': None
     }
-
-    new_clients = ft.Column()
-    add_client_bottomsheet = ft.BottomSheet(
-        content=ft.Container(
-            content=ft.Column(
-                controls=[
-                    ft.Row(
-                        [
-                            ft.Container(ft.Text("Добавление клиентов", size=20, weight=ft.FontWeight.W_500), expand=True),
-                            ft.IconButton(ft.icons.CHECK_CIRCLE, on_click=lambda _: save_new_clients(), tooltip="Завершить")
-                        ]
-                    ),
-                    ft.Column(
-                        controls=[
-                            ft.ProgressBar(),
-                            ft.Text("Здесь будут появляться новые клиенты"),
-                            new_clients,
-                            # ft.Row(
-                            #     [
-                            #         ft.FilledTonalButton("Закончить", on_click=lambda _: save_new_clients()),
-                            #     ],
-                            #     alignment=ft.MainAxisAlignment.CENTER
-                            # )
-
-                        ]
-                    )
-                ]
-            ),
-            padding=15
-        )
-    )
-    page.overlay.append(add_client_bottomsheet)
-
-    # def goto_add_clients():
-    #     global go_find
-    #     go_find = True
-    #     add_client_bottomsheet.open = True
-    #     page.update()
-    #     while go_find:
-    #         ws = connect(ws_source)
-    #         data = ws.recv()
-    #         ws.close()
-    #         print(data)
-    #         data = json.loads(data)
-    #         if data['action'] == "hello":
-    #             saved_clients = load_config()['ws_clients']
-    #             if data['client'] not in saved_clients:
-    #                 new_clients.controls.append(ft.Text(data['client'], size=18, weight=ft.FontWeight.W_300))
-    #                 time.sleep(1)
-    #                 send_data_to_ws(data['client'], 'regok')
-    #                 page.update()
-    #             else:
-    #                 send_data_to_ws(data['client'], 'errid')
 
     def change_audio_mode(e: ft.ControlEvent):
         mode = e.control.data
@@ -386,7 +333,7 @@ def main(page: ft.Page):
                 open_dialog(dialog_loading)
                 client_info = get_client_info(client['name'])
                 # client_info = False
-                print(client)
+                # print(client)
                 if client_info is not False:
                     client_info = json.loads(client_info)
 
