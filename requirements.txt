@@ -1,0 +1,6 @@
+flet==0.21.2
+APScheduler==3.10.4
+requests==2.31.0
+websockets==11.0.3
+python-dotenv==1.0.1
+pygame==2.5.2
