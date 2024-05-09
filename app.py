@@ -20,7 +20,7 @@ ws_source = "ws://localhost:8010"
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
-
+os.environ['FLET_WEB_APP_PATH'] = '/audio'
 ws = connect(ws_source, open_timeout=3, close_timeout=3)
 
 def load_config():
