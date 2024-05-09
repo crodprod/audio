@@ -878,6 +878,5 @@ if __name__ == '__main__':
             target=main,
             assets_dir='assets',
             name='',
-            port=8011,
-            view=None
+            port=8011
         )
