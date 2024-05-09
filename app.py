@@ -23,6 +23,7 @@ logging.basicConfig(level=logging.INFO,
 os.environ['FLET_WEB_APP_PATH'] = '/audio'
 ws = connect(ws_source, open_timeout=3, close_timeout=3)
 
+
 def load_config():
     with open(file='config.json', mode='r', encoding='utf-8') as file:
         return json.load(file)
@@ -615,7 +616,7 @@ def main(page: ft.Page):
         loading_text.value = "Отправка"
         open_dialog(dialog_loading)
         if client_id == 'all':
-            for cid in ['sumstage, territory, conference']:
+            for cid in ['sumstage', 'territory', 'conference']:
                 send_data_to_ws(
                     client=cid,
                     action="setdir",
