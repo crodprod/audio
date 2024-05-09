@@ -1,907 +1,883 @@
-import platform
-from datetime import datetime
+import json
+import logging
 import os
+import platform
 import time
+from datetime import datetime, timedelta
+from apscheduler.schedulers.background import BackgroundScheduler
 
-import requests
-import subprocess
-
-from source.schedule_funcs import start_schedule
-from source.mixer_funcs import control, set_volume, play_start_sound, start_music_check, send_wss_data
-from source.functions import update_config_file, load_config_file
-import source.global_variables
 import flet as ft
-import eyed3
+from apscheduler.triggers.cron import CronTrigger
+from requests import get
 
-# from source.updates import start_check_update
+from websockets.sync.client import connect
+from dotenv import load_dotenv
+from functions import load_config_file, update_config_file
 
-script_path = os.path.abspath(__file__)
-script_directory = os.path.dirname(script_path)
-os.chdir(script_directory)
-project_folder = os.getcwd()
-config_file_name = "audio_config.json"
+load_dotenv()
+go_find = False
+ws_source = "ws://localhost:8010"
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(levelname)s %(message)s")
+
+ws = connect(ws_source, open_timeout=3, close_timeout=3)
+
+def load_config():
+    with open(file='config.json', mode='r', encoding='utf-8') as file:
+        return json.load(file)
 
 
-class Message():
-    def __init__(self, data):
-        self.data = data
+def get_yadisk_listdir(path: str = ""):
+    url = f"https://cloud-api.yandex.net/v1/disk/resources?path=CROD_MEDIA/Общие файлы/Audio/{path}"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f"OAuth {os.getenv('YANDEX_TOKEN')}"
+    }
+    response = get(url=url, headers=headers)
+    if response.status_code == 200:
+        return response.json()['_embedded']['items']
+    else:
+        return None
 
 
-def send_awake():
-    config_data = load_config_file()
-    url = f'https://api.telegram.org/bot{config_data["bot"]["token"]}/sendMessage'
-    data = {'chat_id': config_data['bot']['chat'], 'text': '*Модуль 🔊CROD.Audio перезагружен*',
-            "parse_mode": "Markdown"}
-    requests.post(url=url, data=data)
+def send_data_to_ws(client: str, action: str, params=None):
+    if params:
+        params = str(params)
+    data = {
+        'client': client,
+        'action': action,
+        'params': params
+    }
+    print(data)
+    ws.send(json.dumps(data))
+
+
+def play_music():
+    schedule = load_config()['schedule']
+    for el in schedule:
+        time = datetime.now().time()
+        hour, minute = time.hour, time.minute
+        if el['time']['hour'] == hour and el['time']['min'] == minute:
+            for source in el['sources']:
+                send_data_to_ws(source, 'play')
+
+
+def stop_music():
+    schedule = load_config()['schedule']
+    for el in schedule:
+        time = datetime.now().time()
+        hour, minute = time.hour, time.minute
+        if el['time']['hour'] == hour and el['time']['min'] == minute:
+            for source in el['sources']:
+                send_data_to_ws(source, 'pause')
+
+
+scheduler = BackgroundScheduler()
+
+
+def create_schedule():
+    config = load_config()
+    schedule = config['schedule']
+    scheduler.remove_all_jobs()
+    for index, el in enumerate(schedule):
+        hour = el['time']['hour']
+        minute = el['time']['min']
+        action = el['action']
+
+        if el['active']:
+            if action == "play":
+                job = scheduler.add_job(play_music, 'cron', hour=hour, minute=minute)
+            elif action == "pause":
+                job = scheduler.add_job(stop_music, 'cron', hour=hour, minute=minute)
+            el['job_id'] = job.id
+            schedule[index] = el
+
+    config['schedule'] = schedule
+    update_config_file(config)
+    scheduler.start()
+    scheduler.print_jobs()
 
 
 def main(page: ft.Page):
-    config_data = load_config_file()
-
-    page.title = "Audio"
-    page.fonts = {
-        "Montserrat": "fonts/Montserrat-SemiBold.ttf",
-        "Geologica": "fonts/Geologica.ttf",
-        "Geologica-Black": "fonts/Geologica-black.ttf"
-    }
-    page.theme = ft.Theme(font_family="Montserrat")
-    page.theme_mode = ft.ThemeMode.DARK
-    page.vertical_alignment = ft.MainAxisAlignment.CENTER
+    global go_find
+    page.window_width = 377
+    page.window_height = 768
+    page.vertical_alignment = ft.MainAxisAlignment.START
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+    page.theme_mode = ft.ThemeMode.DARK
+    page.padding = ft.padding.only(left=10, right=10)
+    page.theme = ft.Theme(
+        font_family="Geologica",
+        color_scheme=ft.ColorScheme(
+            primary=ft.colors.WHITE
+        )
+    )
+    page.fonts = {
+        "Geologica": "fonts/Geologica.ttf",
+    }
 
-    hf = ft.HapticFeedback()
-    page.overlay.append(hf)
-
-    main_appbar = ft.AppBar(
-        title=ft.Text('', size=19),
-        bgcolor=ft.colors.SURFACE_VARIANT,
-        leading=None,
+    page.appbar = ft.AppBar(
+        title=ft.Text("Audio", size=20, weight=ft.FontWeight.W_400)
     )
 
-    def on_incoming_message(message: Message):
+    screens_data = {
+        'audio_main': {
+            'leading': None,
+            'title': "Audio",
+            'scroll': ft.ScrollMode.HIDDEN
+        },
+        'audio_settings': {
+            'leading': ft.IconButton(ft.icons.ARROW_BACK, on_click=lambda _: change_screen('audio_main'), tooltip="Назад"),
+            'title': "Настройки",
+            'scroll': ft.ScrollMode.HIDDEN
+        },
+        'audio_schedule': {
+            'leading': ft.IconButton(ft.icons.ARROW_BACK, on_click=lambda _: change_screen('audio_main'), tooltip="Назад"),
+            'title': "Расписание",
+            'scroll': ft.ScrollMode.HIDDEN
+        },
+        'pick_folder': {
+            'leading': ft.IconButton(ft.icons.ARROW_BACK, on_click=lambda _: change_screen('audio_main'), tooltip="Назад"),
+            'title': "Выбор папки",
+            'scroll': ft.ScrollMode.HIDDEN
+        },
+        'edit_timer': {
+            'leading': ft.IconButton(ft.icons.ARROW_BACK, on_click=lambda _: change_screen('audio_schedule'), tooltip="Назад"),
+            'title': "Редактирование",
+            'scroll': ft.ScrollMode.HIDDEN
+        }
+    }
 
-        config_data = message.data
-        vol_slider.value = config_data['volume']
-        autoplay_checkbocx.value = source.global_variables.AUTOPLAY
-        change_controls_visible()
-        fill_playlist()
-        song_name.value = config_data['current_track']['name']
-        song_author.value = config_data['current_track']['author']
-        cur_status.value = config_data['current_track']['cur_status']
+    audio_appbar_actions = {
+        'audio_main': [
+            ft.Container(
+                ft.Row(
+                    [
+                        ft.IconButton(ft.icons.UPDATE, on_click=lambda _: change_screen("audio_main")),
+                        ft.ElevatedButton(icon=ft.icons.SCHEDULE, on_click=lambda _: change_screen('audio_schedule'), tooltip="Расписание", text="Расписание"),
+                    ]
+                ),
+                margin=ft.margin.only(right=10)
+            )
+        ],
+        'audio_settings': None,
+        'audio_schedule': [
+            ft.Container(
+                ft.Row(
+                    [
+                        ft.IconButton(ft.icons.ADD_CIRCLE, on_click=lambda _: print("new"), tooltip="Добавить"),
+                    ]
+                ),
+                margin=ft.margin.only(right=10)
+            )
+        ],
+        'pick_folder': None,
+        'edit_timer': None
+    }
 
-        page.update()
-
-    def change_controls_visible():
-        btn_prev.visible, btn_next.visible = not source.global_variables.AUTOPLAY, not source.global_variables.AUTOPLAY
-        song_name.visible, song_author.visible = not source.global_variables.AUTOPLAY, not source.global_variables.AUTOPLAY
-        btn_play.visible = not btn_pause.visible
-        print("VISIBLE", btn_prev.visible)
-        page.update()
-
-    def send_data():
-        page.pubsub.send_others(Message(data=config_data))
-
-    page.pubsub.subscribe(on_incoming_message)
-
-    def open_classic_snackbar(text: str, *args):
-        # классический бар
-
-        page.snack_bar = ft.SnackBar(
-            content=ft.Row(
+    new_clients = ft.Column()
+    add_client_bottomsheet = ft.BottomSheet(
+        content=ft.Container(
+            content=ft.Column(
                 controls=[
-                    ft.Text(text, size=16)
-                ],
-                alignment=ft.MainAxisAlignment.CENTER
-            ),
-            duration=1500
-        )
-
-        if args:
-            page.snack_bar.bgcolor = args[0]
-            if page.snack_bar.bgcolor in [ft.colors.GREEN, ft.colors.RED]:
-                page.snack_bar.content.controls[0].color = ft.colors.WHITE
-
-        page.snack_bar.open = True
-        page.update()
-
-    def check_pin_field(e: ft.ControlEvent):
-        # проверка корректности пин-кода
-
-        pin = e.control.value
-        if pin:
-            btn_go.disabled = False
-        else:
-            btn_go.disabled = True
-        page.update()
-
-    def check_pin(e: ft.ControlEvent):
-        # проверка пин-кода
-
-        hf.medium_impact()
-        pin = password_field.value
-        if pin == "1111":
-            password_field.border_color = ft.colors.GREEN
-            password_field.value = ""
-            page.update()
-            change_screens("main")
-            password_field.border_color = ft.colors.SURFACE_VARIANT
-            btn_go.disabled = True
-        else:
-            password_field.border_color = ft.colors.RED
-            page.update()
-            time.sleep(2)
-            password_field.border_color = ft.colors.SURFACE_VARIANT
-            page.update()
-
-    def sender(e: ft.ControlEvent):
-        if e.control.data == "autoplay_changed":
-            autoplay_checkbox_value_changed()
-        elif e.control.data == "transmit_changed":
-            transmit_checkbox_value_changed()
-        else:
-            change_screens(e.control.data)
-
-    def insert_to_queue(e: ft.ControlEvent):
-        config_data = load_config_file()
-        new_index = config_data['current_track']['index'] + 1
-        config_data['playlist'].remove(e.control.data)
-        config_data['playlist'].insert(new_index, e.control.data)
-        update_config_file(config_data)
-        playing_process("next")
-
-    def playing_process(action):
-        print("ACTION", action)
-        data = control(action)
-        if action in ['next', 'prev']:
-            btn_play.visible = False
-            btn_pause.visible = True
-            cur_status.value = "играет в данный момент"
-
-            track_name_author = eyed3.load(data)
-
-            song_name.value = track_name_author.tag.title
-            if song_name.value == "":
-                song_name.value = os.path.basename(data)
-            song_author.value = track_name_author.tag.artist
-            if song_author.value == "":
-                song_author.value = "---"
-
-            config_data['current_track']['cur_status'] = cur_status.value
-            config_data['current_track']['name'] = song_name.value
-            config_data['current_track']['author'] = song_author.value
-
-            # page.update()
-
-        elif action == "play":
-            cur_status.value = "играет в данный момент"
-            btn_play.visible = False
-            btn_pause.visible = True
-        elif action == "pause":
-            if autoplay_checkbocx.value:
-                autoplay_checkbocx.value = False
-                autoplay_checkbox_value_changed()
-            btn_play.visible = True
-            btn_pause.visible = False
-            cur_status.value = "на паузе в данный момент"
-        page.update()
-        send_data()
-
-    def track_controls_btns_pressed(e: ft.ControlEvent):
-        # кнопки управления воспроизведением нажаты
-
-        hf.medium_impact()
-        action = e.control.data
-        actions = {
-            "play": "Воспроизведение",
-            "pause": "Пауза",
-            "next": "Следующий трек",
-            "prev": "Предыдущий трек"
-        }
-        open_classic_snackbar(actions[action])
-        playing_process(action)
-        send_data()
-
-    def vol_slider_changed(e: ft.ControlEvent):
-        # слайдер громкости изменился
-
-        volume = int(e.control.value)
-        set_volume(volume / 100)
-        config_data['volume'] = volume
-        vol_value.value = f"{volume}%"
-        update_config_file(config_data)
-        send_data()
-
-    def transmit_checkbox_value_changed():
-        value = transmit_checkbox.value
-        if value:
-            send_wss_data('activate')
-            open_classic_snackbar("Трансляция включена")
-        else:
-            send_wss_data('deactivate')
-            open_classic_snackbar("Трансляция выключена")
-        send_data()
-    def autoplay_checkbox_value_changed():
-        # Изменение автовоспроизведения
-
-        value = autoplay_checkbocx.value
-        if value:
-            open_classic_snackbar("Автоплей")
-            cur_status.value = "автоплей"
-            btn_play.visible = False
-            btn_pause.visible = True
-        else:
-            open_classic_snackbar("Ручное управление")
-            cur_status.value = "ручное управление"
-            btn_play.visible = False
-            btn_pause.visible = True
-
-        source.global_variables.AUTOPLAY = value
-        change_controls_visible()
-
-        send_data()
-        page.update()
-
-    def find_mp3_files(directory):
-        mp3_files = []
-
-        for root, dirs, files in os.walk(directory):
-            for file in files:
-                if file.endswith(".mp3"):
-                    mp3_files.append(os.path.join(root, file))
-
-        return mp3_files
-
-    def update_current_folder(e: ft.ControlEvent):
-        if platform.system() == 'Windows':
-            new_folder = os.path.join("music", e.control.data)
-        else:
-            new_folder = os.path.join("/home/pi/music/Sumstage/livemusic", e.control.data)
-        playlist = find_mp3_files(new_folder)
-        if len(playlist) == 0:
-            open_classic_snackbar("В папке нет музыки", ft.colors.RED)
-        else:
-            config_data['current_track']['index'] = -1
-            config_data['current_dir'] = e.control.data
-            config_data['playlist'] = playlist
-            update_config_file(config_data)
-            change_screens('main')
-            open_classic_snackbar(f"Выбрана папка {e.control.data}")
-            playing_process("next")
-            send_data()
-
-    def schedule_editor(e: ft.ControlEvent):
-        # управление выбранным расписанием
-
-        config_data = load_config_file()
-
-        data = e.control.data
-        action, timer_id = data[0], data[1]
-
-        schedule_list = config_data['schedule']
-        for index, timer in enumerate(schedule_list):
-            if timer['id'] == timer_id:
-                if action == "switch":
-                    config_data['schedule'][index]['active'] = not timer['active']
-                    update_config_file(config_data)
-                    open_classic_snackbar("Таймер переключен")
-                elif action == "delete":
-                    config_data['schedule'].remove(timer)
-                    update_config_file(config_data)
-                    open_classic_snackbar("Таймер удалён")
-
-                get_schedule()
-                page.update()
-                break
-        if action == "edit":
-            print(e.control.data)
-            source.global_variables.edit_timer_data = e.control.data
-            print(source.global_variables.edit_timer_data)
-            timer = source.global_variables.edit_timer_data[1]
-            timer_time_btn.text = f"{timer['hours']}:{timer['minutes']}"
-            timer_time_picker.value = f"{timer['hours']}:{timer['minutes']}"
-
-            if timer['action'] == "next":
-                timer_action_dd.value = "Включение"
-            else:
-                timer_action_dd.value = "Выключение"
-
-            page.dialog = dialog_edit_timer
-            dialog_edit_timer.open = True
-            page.update()
-
-    def get_schedule():
-        config_data = load_config_file()
-
-        timers = config_data['schedule']
-        timers_list.controls.clear()
-
-        actions = {
-            "next": "Включение",
-            "pause": "Выключение",
-        }
-        icons = {
-            "next": [ft.icons.VOLUME_UP_ROUNDED, ft.colors.GREEN],
-            "pause": [ft.icons.VOLUME_OFF_ROUNDED, ft.colors.RED]
-        }
-
-        for timer in timers:
-
-            last_call = ft.Text(size=16)
-
-            if timer['active']:
-                if str(datetime.now().date()) == timer['last_action']:
-                    last_call.value = "Завтра"
-                else:
-                    last_call.value = "Сегодня"
-            else:
-                last_call.value = "Отключен"
-
-            timer_card = ft.Card(
-                ft.Container(
-                    content=ft.Column(
+                    ft.Row(
                         [
-                            ft.Row(
-                                [
-                                    ft.Icon(icons[timer['action']][0], color=ft.colors.WHITE, size=25),
-                                    ft.Text(f"{actions[timer['action']]} в {timer['hours']}:{timer['minutes']}",
-                                            size=19)
-                                ],
-                                alignment=ft.MainAxisAlignment.START
+                            ft.Container(ft.Text("Добавление клиентов", size=20, weight=ft.FontWeight.W_500), expand=True),
+                            ft.IconButton(ft.icons.CHECK_CIRCLE, on_click=lambda _: save_new_clients(), tooltip="Завершить")
+                        ]
+                    ),
+                    ft.Column(
+                        controls=[
+                            ft.ProgressBar(),
+                            ft.Text("Здесь будут появляться новые клиенты"),
+                            new_clients,
+                            # ft.Row(
+                            #     [
+                            #         ft.FilledTonalButton("Закончить", on_click=lambda _: save_new_clients()),
+                            #     ],
+                            #     alignment=ft.MainAxisAlignment.CENTER
+                            # )
+
+                        ]
+                    )
+                ]
+            ),
+            padding=15
+        )
+    )
+    page.overlay.append(add_client_bottomsheet)
+
+    # def goto_add_clients():
+    #     global go_find
+    #     go_find = True
+    #     add_client_bottomsheet.open = True
+    #     page.update()
+    #     while go_find:
+    #         ws = connect(ws_source)
+    #         data = ws.recv()
+    #         ws.close()
+    #         print(data)
+    #         data = json.loads(data)
+    #         if data['action'] == "hello":
+    #             saved_clients = load_config()['ws_clients']
+    #             if data['client'] not in saved_clients:
+    #                 new_clients.controls.append(ft.Text(data['client'], size=18, weight=ft.FontWeight.W_300))
+    #                 time.sleep(1)
+    #                 send_data_to_ws(data['client'], 'regok')
+    #                 page.update()
+    #             else:
+    #                 send_data_to_ws(data['client'], 'errid')
+
+    def change_audio_mode(e: ft.ControlEvent):
+        mode = e.control.data
+        page.controls.clear()
+        if mode == 'single':
+            page.add(all_card)
+            card_single_mode.surface_tint_color = ft.colors.GREEN
+            card_multi_mode.surface_tint_color = None
+        elif mode == 'multi':
+            change_screen("audio_main")
+            card_single_mode.surface_tint_color = None
+            card_multi_mode.surface_tint_color = ft.colors.GREEN
+        page.update()
+
+    card_single_mode = ft.Card(
+        ft.Container(
+            ft.Column(
+                [
+                    ft.ListTile(
+                        title=ft.Text("Совмещённый", size=18, weight=ft.FontWeight.W_400),
+                        subtitle=ft.Text("Все устройства играют один и тот же поток музыки", size=14, weight=ft.FontWeight.W_200),
+                        leading=ft.Icon(ft.icons.SURROUND_SOUND),
+                        data='single',
+                        on_click=change_audio_mode
+                    )
+                ],
+                # width=100,
+                height=80
+            ),
+            padding=ft.padding.only(top=15, bottom=15)
+        ),
+        elevation=10
+    )
+
+    card_multi_mode = ft.Card(
+        ft.Container(
+            ft.Column(
+                [
+                    ft.ListTile(
+                        title=ft.Text("Разделённый", size=18, weight=ft.FontWeight.W_400),
+                        subtitle=ft.Text("Каждым устройством можно управлять отдельно", size=14, weight=ft.FontWeight.W_200),
+                        leading=ft.Icon(ft.icons.FORMAT_LIST_NUMBERED),
+                        data='multi',
+                        on_click=change_audio_mode,
+                        # disabled=True,
+                    )
+                ],
+                # width=100,
+                height=80
+            ),
+            padding=ft.padding.only(top=15, bottom=15)
+        ),
+        elevation=10,
+        surface_tint_color=ft.colors.GREEN
+    )
+
+    mode_bottomsheet = ft.BottomSheet(
+        content=ft.Container(
+            content=ft.Column(
+                controls=[
+                    ft.Text("Режим работы", size=20, weight=ft.FontWeight.W_500),
+                    ft.Column(
+                        controls=[
+                            card_single_mode,
+                            card_multi_mode,
+                        ]
+                    )
+                ]
+            ),
+            padding=15
+        )
+    )
+    page.overlay.append(mode_bottomsheet)
+
+    all_card = ft.Card(
+        ft.Container(
+            ft.Column(
+                controls=[
+                    ft.Row(
+                        [
+                            ft.Icon(ft.icons.MULTITRACK_AUDIO),
+                            ft.Container(ft.Text('Общий', size=20, weight=ft.FontWeight.W_300), expand=True),
+                            ft.IconButton(ft.icons.FOLDER_OPEN, data='all', on_click=lambda _: get_client_info('conference'))
+                        ]
+                    ),
+                    ft.Row(
+                        controls=[
+                            ft.IconButton(ft.icons.SKIP_PREVIOUS, icon_size=45, tooltip="Предыдущий трек", data=f"prevtrack_all", on_click=None),
+                            ft.IconButton(ft.icons.PLAY_ARROW, icon_size=45, tooltip="Продолжить", visible=not True, data=f"play_all",
+                                          on_click=None),
+                            ft.IconButton(ft.icons.PAUSE, icon_size=45, tooltip="Пауза", data=f"pause_all", on_click=None, visible=True),
+                            ft.IconButton(ft.icons.SKIP_NEXT, icon_size=45, tooltip="Следующий трек", data=f"nexttrack_all", on_click=None)
+                        ],
+                        alignment=ft.MainAxisAlignment.CENTER
+                    )
+                ],
+                # height=250,
+                width=600
+            ),
+            # padding=15
+            padding=15
+        ),
+        elevation=5
+    )
+
+    clients_list = ft.Column()
+
+    def send_action(e: ft.ControlEvent):
+        data = e.control.data.split("_")
+        action, client, card_index = (data[0], data[1], int(data[2]))
+        if action in ['play', 'pause', 'prevtrack', 'nexttrack']:
+            response = send_data_to_ws(client, action)
+        elif action == "setvolume":
+            send_data_to_ws(client, action, int(e.control.value) / 100)
+
+        page.update()
+
+    def edit_timer(e: ft.ControlEvent):
+        change_screen("edit_timer", e.control.data)
+
+    def goto_pick_folder(e: ft.ControlEvent):
+        change_screen("pick_folder", e.control.data)
+
+    def change_screen(target: str, value=None):
+        page.controls.clear()
+        page.floating_action_button = None
+
+        page.appbar.actions = audio_appbar_actions[target]
+        page.appbar.leading = screens_data[target]['leading']
+        page.appbar.title.value = screens_data[target]['title']
+        page.scroll = screens_data[target]['scroll']
+
+        clients = {
+            # 0: {
+            #     'name': 'sumstage',
+            #     'title': 'Летняя сцена',
+            #     'icon': ft.icons.SPEAKER
+            # },
+            # 1: {
+            #     'name': 'territory',
+            #     'title': 'Территория',
+            #     'icon': ft.icons.TERRAIN
+            # },
+            2: {
+                'name': 'conference',
+                'title': 'Конференц-зал',
+                'icon': ft.icons.CONTROL_CAMERA
+            },
+        }
+
+        if target == "audio_main":
+            clients_list.controls.clear()
+            for index, c in enumerate(clients.items()):
+                client = c[1]
+                dialog_loading.content.controls[0].controls[0].value = f"Получение данных\n({client['title']})"
+                open_dialog(dialog_loading)
+                client_info = get_client_info(client['name'])
+                # client_info = False
+                print(client)
+                if client_info is not False:
+                    client_info = json.loads(client_info)
+
+                    color = ft.colors.GREEN
+                    vol_value = client_info['vol'] * 100
+                    # btn_pause_visible = client_info['status']
+                else:
+                    color = ft.colors.RED
+                    vol_value = 20
+                    # btn_pause_visible = False
+
+                client_card = ft.Card(
+                    ft.Container(
+                        ft.Column(
+                            controls=[
+                                ft.Row(
+                                    [
+                                        ft.Icon(client['icon'], color=color),
+                                        ft.Container(ft.Text(client['title'], size=20, weight=ft.FontWeight.W_300), expand=True),
+                                        ft.IconButton(ft.icons.FOLDER_OPEN, on_click=goto_pick_folder, data=client['name'])
+                                    ]
+                                ),
+                                ft.Row(
+                                    controls=[
+                                        ft.IconButton(ft.icons.SKIP_PREVIOUS, icon_size=45, tooltip="Предыдущий трек", data=f"prevtrack_{client['name']}_{index}", on_click=send_action),
+                                        ft.IconButton(ft.icons.PLAY_ARROW, icon_size=45, tooltip="Продолжить", data=f"play_{client['name']}_{index}",
+                                                      on_click=send_action),
+                                        ft.IconButton(ft.icons.PAUSE, icon_size=45, tooltip="Пауза", data=f"pause_{client['name']}_{index}", on_click=send_action),
+                                        ft.IconButton(ft.icons.SKIP_NEXT, icon_size=45, tooltip="Следующий трек", data=f"nexttrack_{client['name']}_{index}", on_click=send_action)
+                                    ],
+                                    alignment=ft.MainAxisAlignment.CENTER
+                                ),
+                                ft.Row(
+                                    controls=[
+                                        ft.Icon(ft.icons.VOLUME_UP),
+                                        ft.Container(
+                                            ft.Slider(
+                                                # min=0, max=100, divisions=20, label="{value}%", value=int(float(clients_info[index]['volume']) * 100), width=320, tooltip="Громкость",
+                                                min=0, max=100, divisions=100, label="{value}%", value=vol_value, tooltip="Громкость",
+                                                data=f"setvolume_{client['name']}_{index}",
+                                                on_change_end=send_action,
+                                                expand=True
+                                            ),
+                                            expand=True
+                                        )
+                                    ],
+                                    alignment=ft.MainAxisAlignment.CENTER,
+                                    spacing=0
+                                )
+                            ],
+                            # height=250,
+                            width=600
+                        ),
+                        # padding=15
+                        padding=15
+                    ),
+                    elevation=5,
+                    data=client['name']
+                )
+                clients_list.controls.append(client_card)
+            close_dialog(dialog_loading)
+            page.add(clients_list)
+
+        elif target == "audio_schedule":
+            config = load_config()
+            schedule = config['schedule']
+
+            action = {
+                'play': {
+                    'title': "Включение"
+                },
+                'pause': {
+                    'title': "Выключние"
+                }
+            }
+
+            sources = {
+                'sumstage': "Летняя сцена",
+                'conference': "КЗ",
+                'territory': "Территория"
+            }
+
+            if len(schedule) > 0:
+                col = ft.Column()
+                for index, el in enumerate(schedule):
+                    col.controls.append(
+                        ft.Card(
+                            ft.Container(
+                                ft.Column(
+                                    [
+                                        ft.Row(
+                                            [
+                                                ft.Container(
+                                                    content=ft.ListTile(
+                                                        title=ft.Text(f"{el['time']['hour']}:{el['time']['min']}", size=18, weight=ft.FontWeight.W_400),
+                                                        subtitle=ft.Text(action[el['action']]['title'], size=18)
+                                                    ),
+                                                    expand=True,
+                                                    padding=ft.padding.only(left=-15)
+                                                ),
+                                                ft.IconButton(ft.icons.EDIT, on_click=edit_timer, data=index),
+                                                ft.IconButton(ft.icons.DELETE, ft.colors.RED, on_click=delete_timer, data=index),
+                                                ft.Switch(value=el['active'], active_color=ft.colors.GREEN, on_change=change_timer_status, data=index)
+                                            ]
+                                        ),
+                                        ft.Row(
+                                            [
+                                                ft.Icon(ft.icons.LOCATION_ON),
+                                                ft.Text(', '.join([sources[index] for index in el['sources']]))
+                                            ]
+                                        )
+                                    ],
+                                    horizontal_alignment=ft.CrossAxisAlignment.START
+                                ),
+                                padding=15
                             ),
-                            ft.Row(
-                                [
-                                    ft.Switch(
-                                        value=timer['active'], data=['switch', timer['id']],
-                                        on_change=schedule_editor, active_color=ft.colors.GREEN,
-                                        inactive_thumb_color=ft.colors.RED,
-                                    ),
-                                    last_call,
-                                ]
+                            elevation=5
+                        )
+                    )
+                page.add(col)
+            else:
+                page.add(ft.Text("Список расписания пуст", size=18, weight=ft.FontWeight.W_400))
+        elif target == "audio_settings":
+            pass
+        elif target == "pick_folder":
+            client_id = value
+            loading_text.value = "Загрузка"
+            open_dialog(dialog_loading)
+
+            listdir = get_yadisk_listdir()
+
+            if listdir is not None:
+                col = ft.Column()
+                listdir = [dir for dir in listdir if ".txt" not in dir['name']]
+                for dir in listdir:
+                    col.controls.append(
+                        ft.Card(
+                            ft.Container(
+                                content=ft.Row(
+                                    [
+                                        ft.Container(ft.Text(dir['name'], size=18), expand=True),
+                                        ft.IconButton(ft.icons.ARROW_FORWARD_IOS, on_click=send_new_path, data={'client_id': client_id, 'path': dir['name']})
+                                    ]
+                                ),
+                                padding=ft.padding.only(left=15, right=15)
                             ),
-                            ft.Row(
+                            elevation=5
+                        )
+                    )
+                page.add(col)
+            else:
+                open_sb("Ошибка при получении данных", ft.colors.RED)
+            close_dialog(dialog_loading)
+
+
+        elif target == "edit_timer":
+            config = load_config()
+            schedule = config['schedule']
+            cur_timer = schedule[value]
+
+            for loc in cur_timer['sources']:
+                for location in timer_locations.controls:
+                    if loc == location.controls[0].data:
+                        location.controls[0].value = True
+
+            timer_action_dd.value = cur_timer['action']
+            timer_time_btn.content.value = f"{cur_timer['time']['hour']}:{cur_timer['time']['min']}"
+            # timer_datepicker.da
+
+            col = ft.Column(
+                [
+                    ft.Card(
+                        ft.Container(
+                            ft.Column(
                                 [
-                                    ft.ElevatedButton(
-                                        icon=ft.icons.EDIT_ROUNDED,
-                                        color=ft.colors.WHITE,
-                                        text="Изменить",
-                                        on_click=schedule_editor,
-                                        data=['edit', timer],
-                                    ),
-                                    ft.ElevatedButton(
-                                        icon=ft.icons.DELETE_ROUNDED,
-                                        color=ft.colors.WHITE,
-                                        text="Удалить",
-                                        on_click=schedule_editor,
-                                        data=['delete', timer['id']]
+                                    ft.Row(
+                                        [
+                                            ft.Text("Время", size=18, weight=ft.FontWeight.W_400), timer_time_btn
+                                        ]
                                     )
                                 ]
                             ),
-                        ]
+                            padding=15
+                        ),
+                        elevation=5,
+                        width=600
                     ),
-                    padding=15
-                ),
-                width=500
+                    ft.Card(
+                        ft.Container(
+                            ft.Column(
+                                [
+                                    ft.Column(
+                                        [
+                                            ft.Text("Действие", size=18, weight=ft.FontWeight.W_400), timer_action_dd
+                                        ]
+                                    )
+                                ]
+                            ),
+                            padding=15
+                        ),
+                        elevation=5,
+                        width=600
+                    ),
+                    ft.Card(
+                        ft.Container(
+                            ft.Column(
+                                [
+                                    ft.Column(
+                                        [
+                                            ft.Text("Место", size=18, weight=ft.FontWeight.W_400), timer_locations
+                                        ]
+                                    )
+                                ]
+                            ),
+                            padding=15
+                        ),
+                        elevation=5,
+                        width=600
+                    ),
+                    ft.Row([ft.FilledTonalButton(text="Сохранить", icon=ft.icons.SAVE, on_click=update_timer, data=value)], alignment=ft.MainAxisAlignment.END)
+                ], alignment=ft.MainAxisAlignment.CENTER
             )
-            timers_list.controls.append(timer_card)
 
-    def update_timer_action(e):
-        config_data = load_config_file()
-        print(source.global_variables.edit_timer_data)
-        for index, timer in enumerate(config_data['schedule']):
-            if timer['id'] == source.global_variables.edit_timer_data[1]['id']:
-                if e.control.value == "Включение":
-                    action = "next"
-                else:
-                    action = "pause"
-
-                config_data['schedule'][index]['action'] = action
-                update_config_file(config_data)
-                open_classic_snackbar("Действие изменено")
-                break
-
-    def update_timer_time(e):
-        config_data = load_config_file()
-        print(source.global_variables.edit_timer_data)
-        for index, timer in enumerate(config_data['schedule']):
-            if timer['id'] == source.global_variables.edit_timer_data[1]['id']:
-                config_data['schedule'][index]['hours'] = str(e.control.value.hour)
-                config_data['schedule'][index]['minutes'] = "0" * (2 - len(str(e.control.value.minute))) + str(
-                    e.control.value.minute)
-                update_config_file(config_data)
-                timer_time_btn.text = f"{str(e.control.value.hour)}:{config_data['schedule'][index]['minutes']}"
-                open_classic_snackbar("Время изменено")
-                break
+            page.add(col)
 
         page.update()
 
-    def reboot(e: ft.ControlEvent):
-        # Получение обновлений с гита и перезапуск systemctl
-        reboot_pin = password_field.value
+    def update_timer(e: ft.ControlEvent):
+        timer_index = e.control.data
+        config = load_config()
+        schedule = config['schedule']
+        cur_timer = schedule[timer_index]
+        try:
+            cur_timer['time']['hour'] = timer_datepicker.value.hour
+            cur_timer['time']['min'] = timer_datepicker.value.minute
+        except AttributeError:
+            pass
 
-        script_path = f'{project_folder}/synco.sh'
+        cur_timer['action'] = timer_action_dd.value
 
-        dialog_reboot = ft.AlertDialog(modal=True, content=ft.Column(
-            width=400, height=150,
-            controls=[ft.Text("Приложение обновляется и будет перезапущено. После звукового сигнала откройте его снова",
-                              size=16, text_align=ft.TextAlign.CENTER),
-                      ft.ProgressBar()],
-            alignment=ft.MainAxisAlignment.CENTER,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER
-        ))
+        sources = []
+        for location in timer_locations.controls:
+            if location.controls[0].value:
+                sources.append(location.controls[0].data)
+        cur_timer['sources'] = sources
 
-        if reboot_pin == "6387":
-            page.dialog = dialog_reboot
-            dialog_reboot.open = True
-            page.update()
+        scheduler.remove_job(cur_timer['job_id'])
+        if timer_action_dd.value == "play":
+            job = scheduler.add_job(play_music, 'cron', hour=cur_timer['time']['hour'], minute=cur_timer['time']['min'])
 
-            time.sleep(2)
-            dialog_reboot.open = False
+        elif timer_action_dd.value == "pause":
+            job = scheduler.add_job(stop_music, 'cron', hour=cur_timer['time']['hour'], minute=cur_timer['time']['min'])
+
+        cur_timer['job_id'] = job.id
+        scheduler.print_jobs()
+        schedule[timer_index] = cur_timer
+        config['schedule'] = schedule
+        update_config_file(config)
+
+        change_screen('audio_schedule')
+        open_sb("Таймер сохранён", ft.colors.GREEN)
+
+    def send_new_path(e: ft.ControlEvent):
+        data = e.control.data
+        client_id, path = data['client_id'], data['path']
+        loading_text.value = "Отправка"
+        open_dialog(dialog_loading)
+        send_data_to_ws(
+            client=client_id,
+            action="setdir",
+            params=path
+        )
+        close_dialog(dialog_loading)
+        change_screen("audio_main")
+
+    def datepicker_changed(e: ft.ControlEvent):
+        time = e.control.value
+        hour = "0" * (2 - len(str(time.hour))) + f"{time.hour}"
+        minute = "0" * (2 - len(str(time.minute))) + f"{time.minute}"
+        timer_time_btn.content.value = f"{hour}:{minute}"
+        page.update()
+
+    timer_datepicker = ft.TimePicker(
+        time_picker_entry_mode=ft.TimePickerEntryMode.DIAL_ONLY,
+        cancel_text="Отмена",
+        confirm_text="Сохранить",
+        help_text='Выберите время срабатывания',
+        on_change=datepicker_changed
+    )
+    page.overlay.append(timer_datepicker)
+
+    timer_time_btn = ft.TextButton(on_click=lambda _: timer_datepicker.pick_time(), content=ft.Text(size=18))
+    timer_action_dd = ft.Dropdown(
+        options=[
+            ft.dropdown.Option(text="Включить", key="play"),
+            ft.dropdown.Option(text="Выключить", key="pause")
+        ],
+        hint_text="Выберите действие",
+        width=200
+    )
+    timer_locations = ft.Column(
+        [
+            ft.Row(
+                [
+                    ft.Checkbox(data='sumstage'),
+                    ft.Text("Летняя сцена")
+                ]
+            ),
+            ft.Row(
+                [
+                    ft.Checkbox(data='territory'),
+                    ft.Text("Территория")
+                ]
+            ),
+            ft.Row(
+                [
+                    ft.Checkbox(data='conference'),
+                    ft.Text("КЗ")
+                ]
+            )
+        ]
+    )
+
+    def delete_timer(e: ft.ControlEvent):
+        config = load_config_file()
+
+        schedule = config['schedule']
+        scheduler.remove_job(schedule[e.control.data]['job_id'])
+
+        del schedule[e.control.data]
+        update_config_file(config)
+
+        open_sb("Таймер удалён")
+        change_screen("audio_schedule")
+
+    def change_timer_status(e: ft.ControlEvent):
+        config = load_config_file()
+        schedule = config['schedule']
+        schedule[e.control.data]['active'] = e.control.value
+        update_config_file(config)
+        job_id = schedule[e.control.data]['job_id']
+        if e.control.value:
+            try:
+                scheduler.resume_job(job_id)
+            except Exception:
+                job = scheduler.add_job(play_music, 'cron', hour=schedule[e.control.data]['time']['hour'], minute=schedule[e.control.data]['time']['min'])
+                schedule[e.control.data]['job_id'] = job.id
+                config['schedule'] = schedule
+                update_config_file(config)
+
+            current_time = datetime.now()
+            target_time = datetime(current_time.year, current_time.month, current_time.day, schedule[e.control.data]['time']['hour'], schedule[e.control.data]['time']['min'])
+
+            if target_time < current_time:
+                target_time += timedelta(days=1)
+
+            time_difference = target_time - current_time
+            days = time_difference.days
+            hours, remainder = divmod(time_difference.seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+
+            time = ""
+            if days != 0:
+                time += f"{days} д."
+            if hours != 0:
+                time += f"{hours} ч. "
+            if minutes != 0:
+                time += f"{minutes} мин."
+
+            open_sb(f"Таймер включен\nСработает через {time}", ft.colors.GREEN)
+        else:
+            scheduler.pause_job(job_id)
+
+            open_sb("Таймер выключен")
+        scheduler.print_jobs()
+
+    def open_sb(text: str, bgcolor=ft.colors.WHITE):
+        if bgcolor != ft.colors.WHITE:
+            text_color = ft.colors.WHITE
+        else:
+            text_color = ft.colors.BLACK
+
+        content = ft.Text(text, size=18, text_align=ft.TextAlign.START, weight=ft.FontWeight.W_300, color=text_color)
+        page.snack_bar = ft.SnackBar(
+            content=content,
+            duration=1200,
+            bgcolor=bgcolor
+        )
+        page.snack_bar.open = True
+        page.update()
+
+    def goto_audio_mode():
+        mode_bottomsheet.open = True
+        page.update()
+
+    def get_client_info(client: str, params=None):
+        data = {
+            'client': client,
+            'action': 'getinfo',
+            'params': params
+        }
+        try:
+            # ws = connect(ws_source, open_timeout=3, close_timeout=3)
+            ws.send(json.dumps(data))
 
             try:
-                control("pause")
-                play_start_sound("reboot")
-                subprocess.run([script_path], check=True)
-            except Exception as e:
-                open_classic_snackbar(f"Ошибка перезагрузки", ft.colors.RED)
-                print(f"Ошибка при выполнении команды: {e}")
-        else:
-            password_field.value = ""
-            password_field.border_color = ft.colors.RED
-            page.update()
-            time.sleep(2)
-            password_field.border_color = ft.colors.SURFACE_VARIANT
-        page.update()
+                fl = False
+                while not fl:
+                    msg = ws.recv(timeout=3)
+                    data = json.loads(msg)
+                    if data['client'] == client:
+                        return json.loads(data['action'])
+                    fl = True
+                    # ws.close()
+            except TimeoutError:
+                open_sb(f"{client} недоступен ", ft.colors.RED)
+                # ws.close()
+                return False
+            except Exception:
+                # ws.close()
+                return False
 
-    def fill_playlist():
-        config_data = load_config_file()
-        added = []
-        print(added)
-        playlist.controls.clear()
-        for track in set(config_data['playlist']):
-            song = eyed3.load(track).tag.title
-            if song == "":
-                song = os.path.basename(track)
+        except ConnectionRefusedError:
+            open_sb("Веб-сокет недоступен", ft.colors.RED)
+            return False
 
-            if song not in added:
-                print(song, added)
-                playlist.controls.append(
-                    ft.Container(
-                        ft.TextButton(
-                            text=song, on_click=insert_to_queue, data=track,
-                            style=ft.ButtonStyle(color=ft.colors.WHITE),
-                        ),
-                        margin=ft.margin.only(bottom=-10)
-                    )
-                )
-                added.append(song)
-        page.update()
+    loading_text = ft.Text("Загрузка", size=20, weight=ft.FontWeight.W_400)
+    dialog_loading = ft.AlertDialog(
+        # Диалог с кольцом загрузки
 
-    def change_screens(target):
-        # изменение экранов
-
-        page.clean()
-        page.appbar = None
-        main_appbar.actions = None
-        page.navigation_bar = None
-        page.scroll = None
-        page.floating_action_button = None
-
-        if target == "login":
-            password_field.on_change = check_pin_field
-            btn_go.on_click = check_pin
-            page.add(ft.Container(content=screen_login, expand=True))
-
-        elif target == "main":
-            config_data = load_config_file()
-
-            song_name.value, song_author.value = config_data['current_track']['name'], config_data['current_track'][
-                'author']
-            vol_slider.value = config_data['volume']
-            vol_value.value = f"{config_data['volume']}%"
-            set_volume(config_data['volume'] / 100)
-            autoplay_checkbocx.value = source.global_variables.AUTOPLAY
-            autoplay_checkbox_value_changed()
-            fill_playlist()
-            page.appbar = main_appbar
-            main_appbar.title.value = "Воспроизведение"
-            main_appbar.leading = ft.IconButton(
-                icon=ft.icons.EXIT_TO_APP_ROUNDED,
-                on_click=sender,
-                data="login"
-            )
-            page.add(screen_main)
-
-        elif target == "pick_folder":
-            config_data = load_config_file()
-
-            page.appbar = main_appbar
-            main_appbar.title.value = "Выбор папки"
-            main_appbar.leading = ft.IconButton(
-                icon=ft.icons.ARROW_BACK_ROUNDED,
-                data="main",
-                on_click=sender
-            )
-
-            directories = [d for d in os.listdir('/home/pi/music/Sumstage/livemusic') if
-                           os.path.isdir(os.path.join('/home/pi/music/Sumstage/livemusic', d))]
-            folders_list.controls.clear()
-            if len(directories) > 0:
-                text = "Выберите папку, из которой необходимо играть музыку"
-                control_row.disabled = False
-                autoplay_checkbocx.disabled = False
-            else:
-                text = "Папок с музыкой нет, загрузите их в память и попробуйте снова"
-                control_row.disabled = True
-                autoplay_checkbocx.disabled = True
-            folders_list.controls.append(
-                ft.Text(text,
-                        width=300,
-                        text_align=ft.TextAlign.CENTER,
-                        size=16
-                        )
-            )
-            for dir in directories:
-                print(dir, config_data['current_dir'])
-                folder_btn = ft.ElevatedButton(
-                    "Выбрать",
-                    color=ft.colors.WHITE,
-                    data=dir,
-                    on_click=update_current_folder
-                )
-                folder_icon = ft.Icon(ft.icons.FOLDER_ROUNDED)
-
-                if os.path.basename(dir) == os.path.basename(config_data['current_dir']):
-                    folder_btn.disabled = True
-                    folder_btn.text = "Текущая"
-                    folder_icon = ft.Icon(ft.icons.FOLDER_SHARED_ROUNDED)
-
-                dir_row = ft.Row(
-                    [
-                        folder_icon,
-                        ft.Text(os.path.basename(dir), width=150, size=17),
-                        folder_btn
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER
-                )
-                folders_list.controls.append(dir_row)
-
-            page.add(screen_folders)
-
-        elif target == "schedule":
-
-            page.appbar = main_appbar
-            main_appbar.title.value = "Расписание"
-            main_appbar.leading = ft.IconButton(
-                icon=ft.icons.ARROW_BACK_ROUNDED,
-                data="main",
-                on_click=sender
-            )
-            page.floating_action_button = ft.FloatingActionButton(
-                icon=ft.icons.EDIT_CALENDAR_ROUNDED
-            )
-
-            get_schedule()
-            page.add(screen_schedule)
-
-        else:
-            page.add(
-                ft.Column(
-                    [
-                        ft.Text("Упс, на этой странице ещё ничего нет...", size=30, font_family="Montserrat"),
-                        ft.ElevatedButton(
-                            "Назаааааааад",
-                            icon=ft.icons.ARROW_BACK_ROUNDED,
-                            data="main",
-                            on_click=sender,
-                            color=ft.colors.WHITE
-                        )
-                    ]
-                )
-            )
-
-        page.update()
-
-    password_field = ft.TextField(
-        label="Код доступа",
-        width=250,
-        password=True,
-        on_submit=check_pin,
-        keyboard_type=ft.KeyboardType.NUMBER,
-        text_align=ft.TextAlign.CENTER,
-        border_width=2
-    )
-
-    btn_go = ft.ElevatedButton(
-        text="Войти",
-        color=ft.colors.WHITE,
-        # on_long_press=reboot,
-        icon=ft.icons.KEYBOARD_ARROW_RIGHT_ROUNDED,
-        disabled=True,
-        width=250,
-        height=50
-    )
-
-    update_text = ft.Text("Новое обновление доступно!", size=14, text_align=ft.TextAlign.CENTER, visible=False)
-    version_text = ft.Text("")
-    screen_login = ft.Column(
-        [
-            ft.Column(
-                [
-                    ft.Text("Audio", size=35, font_family="Montserrat", text_align=ft.TextAlign.CENTER),
-                    password_field,
-                    btn_go,
-                    update_text
-                ],
-                expand=True,
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                alignment=ft.MainAxisAlignment.CENTER,
-            ),
-            ft.Row(
-                [
-                    version_text
-                ],
-                alignment=ft.MainAxisAlignment.START
-            )
-        ],
-        alignment=ft.MainAxisAlignment.CENTER,
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-    )
-
-    btn_play = ft.IconButton(
-        icon=ft.icons.PLAY_ARROW_ROUNDED,
-        icon_size=50,
-        data="play",
-        on_click=track_controls_btns_pressed,
-        icon_color=ft.colors.WHITE
-    )
-
-    btn_pause = ft.IconButton(
-        icon=ft.icons.PAUSE_ROUNDED,
-        icon_size=50,
-        data="pause",
-        on_click=track_controls_btns_pressed,
-        icon_color=ft.colors.WHITE
-    )
-
-    btn_next = ft.IconButton(
-        icon=ft.icons.SKIP_NEXT_ROUNDED,
-        icon_size=35,
-        data="next",
-        on_click=track_controls_btns_pressed,
-        icon_color=ft.colors.WHITE
-    )
-
-    btn_prev = ft.IconButton(
-        icon=ft.icons.SKIP_PREVIOUS_ROUNDED,
-        icon_size=35,
-        data="prev",
-        on_click=track_controls_btns_pressed,
-        icon_color=ft.colors.WHITE
-    )
-
-    btn_pick_folders = ft.ElevatedButton(
-        "Выбор папки",
-        color=ft.colors.WHITE,
-        icon=ft.icons.CREATE_NEW_FOLDER_ROUNDED,
-        data="pick_folder",
-        on_click=sender
-    )
-
-    btn_timers = ft.ElevatedButton(
-        "Расписание",
-        color=ft.colors.WHITE,
-        icon=ft.icons.SCHEDULE_ROUNDED,
-        data="schedule",
-        on_click=sender
-    )
-
-    vol_slider = ft.Slider(
-        value=config_data['volume'] / 100,
-        min=0, max=100,
-        divisions=100,
-        label="{value}%", width=300,
-        active_color=ft.colors.WHITE,
-        on_change=vol_slider_changed
-    )
-
-    vol_value = ft.Text(size=17)
-
-    autoplay_checkbocx = ft.Checkbox(
-        label="Автоматическое переключение",
-        data="autoplay_changed",
-        on_change=sender,
-        adaptive=True
-    )
-
-    transmit_checkbox = ft.Checkbox(
-        label="Трансляция",
-        data="transmit_changed",
-        on_change=sender,
-        adaptive=True
-    )
-
-    control_row = ft.Row(
-        [
-            btn_prev, btn_play, btn_pause, btn_next
-        ],
-        alignment=ft.MainAxisAlignment.CENTER
-    )
-
-    cur_status = ft.Text("")
-    song_name = ft.Text("---", size=24)
-    song_author = ft.Text("---", size=20)
-    playlist = ft.Column(alignment=ft.MainAxisAlignment.START, horizontal_alignment=ft.CrossAxisAlignment.START,
-                         scroll=ft.ScrollMode.ADAPTIVE, height=200, width=300)
-
-    screen_main = ft.Column(
-        [
-            ft.Column(
-                [
-                    # ft.Text("Текущий плейлист", size=18),
-                    # playlist,
-                    ft.Container(ft.Divider(thickness=2), width=300),
-                    song_name,
-                    ft.Container(
-                        song_author,
-                        margin=ft.margin.only(top=-15)
-                    ),
-                    # cur_status,
-                ],
-                alignment=ft.MainAxisAlignment.CENTER,
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER
-            ),
-            control_row,
-            ft.Row(
-                [
-                    ft.Icon(ft.icons.VOLUME_UP_ROUNDED, color=ft.colors.WHITE),
-                    ft.Container(
-                        vol_slider,
-                        margin=ft.margin.only(left=-25, right=-25)
-                    ),
-                    vol_value
-
-                ],
-                alignment=ft.MainAxisAlignment.CENTER
-            ),
-            ft.Row(
-                [
-                    autoplay_checkbocx
-                ],
-                alignment=ft.MainAxisAlignment.CENTER
-            ),
-            ft.Row(
-                [
-                    transmit_checkbox
-                ],
-                alignment=ft.MainAxisAlignment.CENTER
-            ),
-            ft.Row(
-                [
-                    btn_pick_folders, btn_timers
-                ],
-                alignment=ft.MainAxisAlignment.CENTER
-            )
-        ],
-        alignment=ft.MainAxisAlignment.CENTER,
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        expand=True
-    )
-
-    folders_list = ft.Column(
-        # scroll=ft.ScrollMode.ADAPTIVE
-        alignment=ft.MainAxisAlignment.CENTER,
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        expand=True
-    )
-
-    timers_list = ft.Column(
-        scroll=ft.ScrollMode.ADAPTIVE,
-        alignment=ft.MainAxisAlignment.START,
-    )
-
-    screen_folders = ft.Column(
-        [
-            folders_list
-        ],
-        alignment=ft.MainAxisAlignment.CENTER,
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        expand=True,
-        # scroll=ft.ScrollMode.ADAPTIVE
-    )
-
-    screen_schedule = ft.Column(
-        [
-            timers_list
-        ],
-        alignment=ft.MainAxisAlignment.CENTER,
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        expand=True,
-        scroll=ft.ScrollMode.ADAPTIVE
-    )
-
-    timer_time_picker = ft.TimePicker(
-        time_picker_entry_mode=ft.TimePickerEntryMode.DIAL_ONLY,
-        help_text="Выберите время активации",
-        confirm_text="Сохранить",
-        cancel_text="Назад",
-        error_invalid_text="Неправильный формат",
-        on_change=update_timer_time
-    )
-    page.overlay.append(timer_time_picker)
-    timer_time_btn = ft.ElevatedButton(
-        "Изменить время",
-        on_click=lambda _: timer_time_picker.pick_time(),
-        color=ft.colors.WHITE,
-        icon=ft.icons.ACCESS_TIME_ROUNDED
-    )
-    timer_action_dd = ft.Dropdown(
-        # width=100,
-        options=[
-            ft.dropdown.Option("Включение"),
-            ft.dropdown.Option("Выключение"),
-        ],
-        on_change=update_timer_action
-    )
-
-    dialog_edit_timer = ft.AlertDialog(
+        # title=ft.Text(size=20),
         modal=True,
-        title=ft.Text("Изменение", size=20),
         content=ft.Column(
-            [
-                ft.Text("Время активации", size=18),
-                timer_time_btn,
-                ft.Container(ft.Divider(thickness=1)),
-                ft.Text("Действие", size=18),
-                timer_action_dd
+            controls=[
+                ft.Column([loading_text, ft.ProgressBar()], alignment=ft.MainAxisAlignment.CENTER),
             ],
-            height=250,
-            width=400
-        ),
-        actions=[
-            ft.ElevatedButton(
-                text="Назад",
-                icon=ft.icons.ARROW_BACK_ROUNDED,
-                color=ft.colors.WHITE,
-                on_click=lambda _: close_dialog(dialog_edit_timer)
-            )
-        ],
-        actions_alignment=ft.MainAxisAlignment.END
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            width=400,
+            height=50
+        )
     )
+
+    def open_dialog(dialog: ft.AlertDialog):
+        page.dialog = dialog
+        dialog.open = True
+        page.update()
+
+        if dialog == dialog_loading:
+            # pass
+            time.sleep(0.5)
 
     def close_dialog(dialog: ft.AlertDialog):
         dialog.open = False
-        get_schedule()
         page.update()
 
-    # print("!!!!!!", source.global_variables.UPDATE)
-    # if source.global_variables.UPDATE:
-    #     update_text.visible = True
-    # else:
-    #     update_text.visible = False
+    def send_data_to_ws(client: str, action: str, params=None):
+        if params:
+            params = str(params)
+        data = {
+            'client': client,
+            'action': action,
+            'params': params
+        }
+        try:
+            # ws = connect(ws_source, open_timeout=3, close_timeout=3)
+            ws.send(json.dumps(data))
+            # ws.close()
+            return True
+        except ConnectionRefusedError:
+            open_sb("Веб-сокет недоступен", ft.colors.RED)
+            return False
 
-    version_text.value = f"CROD.Audio (сборка {config_data['version'][:7]})"
-    page.update()
-    change_screens("login")
+    change_screen('audio_main')
 
 
-DEFAULT_FLET_PATH = ''
-flet_path = os.getenv("FLET_PATH", DEFAULT_FLET_PATH)
-if __name__ == "__main__":
-    play_start_sound("start")
-    # start_check_update()
-    start_music_check()
-    start_schedule()
-    if platform.system() == 'Windows':
+create_schedule()
+
+if __name__ == '__main__':
+    if platform.system() == "Windows":
         ft.app(
             target=main,
-            assets_dir='assets'
-        )
-    else:
-        send_awake()
-        ft.app(
-            name=flet_path,
-            target=main,
-            view=None,
+            assets_dir='assets',
             port=8502,
-            assets_dir="assets"
+            view=ft.AppView.WEB_BROWSER
+        )
+    elif platform.system() == "Linux":
+        ft.app(
+            target=main,
+            assets_dir='assets',
+            name='',
+            port=8502,
+            view=None
         )
