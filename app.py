@@ -507,6 +507,7 @@ def main(page: ft.Page):
 
             for loc in cur_timer['sources']:
                 for location in timer_locations.controls:
+                    location.controls[0].value = False
                     if loc == location.controls[0].data:
                         location.controls[0].value = True
 
