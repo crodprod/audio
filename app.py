@@ -15,13 +15,20 @@ from elements.screens import screens_data
 
 load_dotenv()
 
+ws_status = {'status': False, 'error': ""}
 ws_source = "ws://localhost:8010"
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 
 os.environ['FLET_WEB_APP_PATH'] = '/audio'
-ws = connect(ws_source, open_timeout=3, close_timeout=3)
+
+try:
+    ws = connect(ws_source, open_timeout=3, close_timeout=3)
+    ws_status['status'] = True
+except Exception as e:
+    ws_status['status'] = False
+    ws_status['error'] = e
 scheduler = BackgroundScheduler()
 
 
@@ -64,7 +71,6 @@ def send_data_to_ws(client: str, action: str, params=None):
         'action': action,
         'params': params
     }
-
     ws.send(json.dumps(data))
 
 
@@ -828,7 +834,21 @@ def main(page: ft.Page):
         horizontal_alignment=ft.CrossAxisAlignment.CENTER
     )
 
-    change_screen('login')
+    dialog_info = ft.AlertDialog(
+        modal=True,
+        title=ft.Row(
+            [
+                ft.Container(ft.Text("Веб-сокет", size=20, weight=ft.FontWeight.W_400), expand=True),
+                # ft.IconButton(ft.icons.CLOSE_ROUNDED, on_click=lambda _: close_dialog(dialog_info))
+            ]
+        )
+    )
+
+    if ws_status['status']:
+        change_screen('login')
+    else:
+        dialog_info.content = ft.Text(f"Не удалось подключиться к веб-сокету. Перезагрузите его через Коннект и попробуйте ещё раз.\n\nОшибка: {ws_status['error']}", size=17)
+        open_dialog(dialog_info)
 
 
 create_schedule()
