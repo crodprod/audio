@@ -202,6 +202,7 @@ def main(page: ft.Page):
     def change_screen(target: str, value=None):
         page.controls.clear()
         page.floating_action_button = None
+        page.appbar.visible = True
 
         page.appbar.actions = audio_appbar_actions[target]
         if screens_data[target]['leading']['icon'] is not None:
@@ -228,7 +229,7 @@ def main(page: ft.Page):
         }
 
         if target == "login":
-            page.appbar = None
+            page.appbar.visible = False
             page.add(ft.Container(login_col, expand=True))
 
         elif target == "main":
