@@ -4,9 +4,16 @@ import os
 import sys
 import threading
 import time
+import subprocess
 
+import websockets.exceptions
 from pygame import mixer
 from websockets.sync.client import connect
+
+# script_path = os.path.abspath(__file__)
+# script_directory = os.path.dirname(script_path)
+# os.chdir(script_directory)
+# project_folder = os.getcwd()
 
 mixer.init()
 ws_source = "wss://evolving-hedgehog-wholly.ngrok-free.app"
@@ -21,7 +28,15 @@ current_filename = ""
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 
-ws = connect(ws_source, open_timeout=3, close_timeout=3)
+connected = False
+while not connected:
+    try:
+        print("\nПопытка подключения к вебсокету...")
+        ws = connect(ws_source, open_timeout=3, close_timeout=3)
+        connected = True
+    except Exception:
+        print("Неудачная попытка подключения к веб-сокету. Следующая попытка через 5 секунд...")
+        time.sleep(5)
 
 
 def autonext():
@@ -73,15 +88,17 @@ def ws_send(input_data):
 
 def ws_recieve():
     try:
-        try:
-            data = ws.recv()
-            # print("Данные получены")
-            return data
-        except TimeoutError:
-            print("Клиент недоступен")
-            return False
-    except ConnectionRefusedError:
-        print("Веб-сокет недоступен")
+        data = ws.recv()
+        # print("Данные получены")
+        return data
+    except Exception:
+        return False
+    except TimeoutError:
+        print("Клиент недоступен")
+        return False
+    except websockets.exceptions.ConnectionClosedOK:
+        return False
+    except websockets.exceptions.ConnectionClosedError:
         return False
 
 
@@ -206,7 +223,7 @@ def receive_messages():
                 print(f">>> {data}")
                 make_action(data)
         else:
-            start()
+            reboot()
 
 
 data = {
@@ -231,6 +248,15 @@ clients = {
 }
 
 
+def reboot():
+    config = get_config()
+    config['autorestart'] = True
+    config['client_id'] = client_id
+    update_config(config)
+    # subprocess.Popen([f"{project_folder}/audio_config/hot_restart.bat"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
 def get_config():
     with open('audio_config/client_config.json', 'r') as f:
         return json.load(f)
@@ -242,16 +268,32 @@ def update_config(data):
 
 
 if not os.path.exists('audio_config'):
+    print("Создание папки конфигурации")
     os.mkdir('audio_config')
+    while not os.path.exists('audio_config'):
+        print('создание...')
+        os.mkdir('audio_config')
     with open('audio_config/client_config.json', 'w') as f:
         data = {
             "volume": 0,
             "rootdir": "",
-            "curdir": ""
+            "curdir": "",
+            "autorestart": False,
+            "client_id": None
         }
         json.dump(data, f, indent=2, ensure_ascii=False)
         f.close()
-
+    # with open('audio_config/hot_restart.bat', 'w') as b:
+    #     lines = [
+    #         "@echo off",
+    #         "\ntimeout /t 5 /nobreak >nul",
+    #         "\n",
+    #         r'start "" "%~dp0\audio_client.exe"'
+    #     ]
+    #     b.writelines(lines)
+    #     b.close()
+else:
+    print("Папка конфигурации обнаружена")
 config = get_config()
 
 if config['volume'] > 0:
@@ -287,18 +329,25 @@ else:
 
 print("\nДля сброса параметров удалите папку audio_config")
 
-client_id = input(
-    "\nВведите ID клиента:"
-    "\n1. Летняя сцена"
-    "\n2. Территория"
-    "\n3. Конференц-зал"
-    "\n>> "
-)
+if config['autorestart']:
+    print("\n\nАвтоматическая перезагрузка из-за потери подключения к веб-сокету")
+    client_id = config['client_id']
+    config['autorestart'] = False
+    update_config(config)
+    make_action({'action': 'nexttrack', 'params': None})
+else:
+    client_id = input(
+        "\nВведите ID клиента:"
+        "\n1. Летняя сцена"
+        "\n2. Территория"
+        "\n3. Конференц-зал"
+        "\n>> "
+    )
 
-while client_id not in ['1', '2', '3']:
-    print("Некорректные данные")
-    client_id = input("Введите номер клиента"
-                      "\n>> ")
+    while client_id not in ['1', '2', '3']:
+        print("Некорректные данные")
+        client_id = input("Введите номер клиента"
+                          "\n>> ")
 
 print(f"Выбран клиент: {clients[int(client_id)]}")
 
