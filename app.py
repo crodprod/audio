@@ -3,25 +3,26 @@ import logging
 import os
 import platform
 import time
+import flet as ft
+
+from requests import get
+from dotenv import load_dotenv
 from datetime import datetime, timedelta
+from websockets.sync.client import connect
 from apscheduler.schedulers.background import BackgroundScheduler
 
-import flet as ft
-from apscheduler.triggers.cron import CronTrigger
-from requests import get
-
-from websockets.sync.client import connect
-from dotenv import load_dotenv
-from functions import load_config_file, update_config_file
+from elements.screens import screens_data
 
 load_dotenv()
-go_find = False
+
 ws_source = "ws://localhost:8010"
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
+
 os.environ['FLET_WEB_APP_PATH'] = '/audio'
 ws = connect(ws_source, open_timeout=3, close_timeout=3)
+scheduler = BackgroundScheduler()
 
 
 def load_config():
@@ -29,13 +30,25 @@ def load_config():
         return json.load(file)
 
 
+def update_config(data):
+    with open(file='config.json', mode="w", encoding="utf-8") as config_file:
+        json.dump(data, config_file, indent=2, ensure_ascii=False)
+
+
 def get_yadisk_listdir(path: str = ""):
-    url = f"https://cloud-api.yandex.net/v1/disk/resources?path=CROD_MEDIA/Общие файлы/Audio/{path}"
+    url = f"https://cloud-api.yandex.net/v1/disk/resources"
+
     headers = {
         'Accept': 'application/json',
         'Authorization': f"OAuth {os.getenv('YANDEX_TOKEN')}"
     }
-    response = get(url=url, headers=headers)
+
+    params = {
+        'path': f"CROD_MEDIA/Общие файлы/Audio/{path}"
+    }
+
+    response = get(url=url, headers=headers, params=params)
+
     if response.status_code == 200:
         return response.json()['_embedded']['items']
     else:
@@ -45,12 +58,13 @@ def get_yadisk_listdir(path: str = ""):
 def send_data_to_ws(client: str, action: str, params=None):
     if params:
         params = str(params)
+
     data = {
         'client': client,
         'action': action,
         'params': params
     }
-    # print(data)
+
     ws.send(json.dumps(data))
 
 
@@ -74,13 +88,12 @@ def stop_music():
                 send_data_to_ws(source, 'pause')
 
 
-scheduler = BackgroundScheduler()
-
-
 def create_schedule():
     config = load_config()
     schedule = config['schedule']
+
     scheduler.remove_all_jobs()
+
     for index, el in enumerate(schedule):
         hour = el['time']['hour']
         minute = el['time']['min']
@@ -89,23 +102,29 @@ def create_schedule():
         if el['active']:
             if action == "play":
                 job = scheduler.add_job(play_music, 'cron', hour=hour, minute=minute)
+
             elif action == "pause":
                 job = scheduler.add_job(stop_music, 'cron', hour=hour, minute=minute)
             el['job_id'] = job.id
             schedule[index] = el
 
     config['schedule'] = schedule
-    update_config_file(config)
+    update_config(config)
+
     scheduler.start()
     scheduler.print_jobs()
 
 
 def main(page: ft.Page):
-    global go_find
-    page.window_width = 377
-    page.window_height = 768
+    if platform.system() == "Windows":
+        page.window_width = 377
+        page.window_height = 768
+
+    page.title = "Audio"
+
     page.vertical_alignment = ft.MainAxisAlignment.START
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+
     page.theme_mode = ft.ThemeMode.DARK
     page.padding = ft.padding.only(left=10, right=10)
     page.theme = ft.Theme(
@@ -122,170 +141,47 @@ def main(page: ft.Page):
         title=ft.Text("Audio", size=20, weight=ft.FontWeight.W_400),
     )
 
+    def login():
+        true_password = os.getenv('ACCESS_CODE')
+        if login_field.value == true_password:
+            change_screen("main")
+        else:
+            open_sb("Неверный код")
+        login_field.value = ""
+        page.update()
+
     def goto_pick_folder(e: ft.ControlEvent):
         change_screen("pick_folder", e.control.data)
 
-    screens_data = {
-        'audio_main': {
-            'leading': None,
-            'title': "Audio",
-            'scroll': ft.ScrollMode.HIDDEN
-        },
-        'audio_settings': {
-            'leading': ft.IconButton(ft.icons.ARROW_BACK, on_click=lambda _: change_screen('audio_main'), tooltip="Назад"),
-            'title': "Настройки",
-            'scroll': ft.ScrollMode.HIDDEN
-        },
-        'audio_schedule': {
-            'leading': ft.IconButton(ft.icons.ARROW_BACK, on_click=lambda _: change_screen('audio_main'), tooltip="Назад"),
-            'title': "Расписание",
-            'scroll': ft.ScrollMode.HIDDEN
-        },
-        'pick_folder': {
-            'leading': ft.IconButton(ft.icons.ARROW_BACK, on_click=lambda _: change_screen('audio_main'), tooltip="Назад"),
-            'title': "Выбор папки",
-            'scroll': ft.ScrollMode.HIDDEN
-        },
-        'edit_timer': {
-            'leading': ft.IconButton(ft.icons.ARROW_BACK, on_click=lambda _: change_screen('audio_schedule'), tooltip="Назад"),
-            'title': "Редактирование",
-            'scroll': ft.ScrollMode.HIDDEN
-        }
-    }
-
     audio_appbar_actions = {
-        'audio_main': [
+        'login': None,
+        'main': [
             ft.Container(
                 ft.Row(
                     [
                         ft.IconButton(ft.icons.MULTITRACK_AUDIO, on_click=goto_pick_folder, data='all', tooltip="Синхронизация"),
-                        ft.IconButton(ft.icons.UPDATE, on_click=lambda _: change_screen("audio_main"), tooltip="Обновить"),
-                        ft.IconButton(icon=ft.icons.SCHEDULE, on_click=lambda _: change_screen('audio_schedule'), tooltip="Расписание"),
+                        ft.IconButton(ft.icons.UPDATE, on_click=lambda _: change_screen("main"), tooltip="Обновить"),
+                        ft.IconButton(icon=ft.icons.SCHEDULE, on_click=lambda _: change_screen('schedule'), tooltip="Расписание"),
                     ]
                 ),
                 margin=ft.margin.only(right=10)
             )
         ],
-        'audio_settings': None,
-        'audio_schedule': [
+        'settings': None,
+        'schedule': [
             ft.Container(
                 ft.Row(
                     [
-                        # ft.IconButton(ft.icons.ADD_CIRCLE, on_click=lambda _: print("new"), tooltip="Добавить"),
+                        ft.IconButton(ft.icons.ADD_CIRCLE, on_click=lambda _: change_screen("new_timer"), tooltip="Новый таймер"),
                     ]
                 ),
                 margin=ft.margin.only(right=10)
             )
         ],
         'pick_folder': None,
-        'edit_timer': None
+        'edit_timer': None,
+        'new_timer': None
     }
-
-    def change_audio_mode(e: ft.ControlEvent):
-        mode = e.control.data
-        page.controls.clear()
-        if mode == 'single':
-            page.add(all_card)
-            card_single_mode.surface_tint_color = ft.colors.GREEN
-            card_multi_mode.surface_tint_color = None
-        elif mode == 'multi':
-            change_screen("audio_main")
-            card_single_mode.surface_tint_color = None
-            card_multi_mode.surface_tint_color = ft.colors.GREEN
-        page.update()
-
-    card_single_mode = ft.Card(
-        ft.Container(
-            ft.Column(
-                [
-                    ft.ListTile(
-                        title=ft.Text("Совмещённый", size=18, weight=ft.FontWeight.W_400),
-                        subtitle=ft.Text("Все устройства играют один и тот же поток музыки", size=14, weight=ft.FontWeight.W_200),
-                        leading=ft.Icon(ft.icons.SURROUND_SOUND),
-                        data='single',
-                        on_click=change_audio_mode
-                    )
-                ],
-                # width=100,
-                height=80
-            ),
-            padding=ft.padding.only(top=15, bottom=15)
-        ),
-        elevation=10
-    )
-
-    card_multi_mode = ft.Card(
-        ft.Container(
-            ft.Column(
-                [
-                    ft.ListTile(
-                        title=ft.Text("Разделённый", size=18, weight=ft.FontWeight.W_400),
-                        subtitle=ft.Text("Каждым устройством можно управлять отдельно", size=14, weight=ft.FontWeight.W_200),
-                        leading=ft.Icon(ft.icons.FORMAT_LIST_NUMBERED),
-                        data='multi',
-                        on_click=change_audio_mode,
-                        # disabled=True,
-                    )
-                ],
-                # width=100,
-                height=80
-            ),
-            padding=ft.padding.only(top=15, bottom=15)
-        ),
-        elevation=10,
-        surface_tint_color=ft.colors.GREEN
-    )
-
-    mode_bottomsheet = ft.BottomSheet(
-        content=ft.Container(
-            content=ft.Column(
-                controls=[
-                    ft.Text("Режим работы", size=20, weight=ft.FontWeight.W_500),
-                    ft.Column(
-                        controls=[
-                            card_single_mode,
-                            card_multi_mode,
-                        ]
-                    )
-                ]
-            ),
-            padding=15
-        )
-    )
-    page.overlay.append(mode_bottomsheet)
-
-    all_card = ft.Card(
-        ft.Container(
-            ft.Column(
-                controls=[
-                    ft.Row(
-                        [
-                            ft.Icon(ft.icons.MULTITRACK_AUDIO),
-                            ft.Container(ft.Text('Общий', size=20, weight=ft.FontWeight.W_300), expand=True),
-                            ft.IconButton(ft.icons.FOLDER_OPEN, data='all', on_click=lambda _: get_client_info('conference'))
-                        ]
-                    ),
-                    ft.Row(
-                        controls=[
-                            ft.IconButton(ft.icons.SKIP_PREVIOUS, icon_size=45, tooltip="Предыдущий трек", data=f"prevtrack_all", on_click=None),
-                            ft.IconButton(ft.icons.PLAY_ARROW, icon_size=45, tooltip="Продолжить", visible=not True, data=f"play_all",
-                                          on_click=None),
-                            ft.IconButton(ft.icons.PAUSE, icon_size=45, tooltip="Пауза", data=f"pause_all", on_click=None, visible=True),
-                            ft.IconButton(ft.icons.SKIP_NEXT, icon_size=45, tooltip="Следующий трек", data=f"nexttrack_all", on_click=None)
-                        ],
-                        alignment=ft.MainAxisAlignment.CENTER
-                    )
-                ],
-                # height=250,
-                width=600
-            ),
-            # padding=15
-            padding=15
-        ),
-        elevation=5
-    )
-
-    clients_list = ft.Column()
 
     def send_action(e: ft.ControlEvent):
         data = e.control.data.split("_")
@@ -297,15 +193,13 @@ def main(page: ft.Page):
 
         page.update()
 
-    def edit_timer(e: ft.ControlEvent):
-        change_screen("edit_timer", e.control.data)
-
     def change_screen(target: str, value=None):
         page.controls.clear()
         page.floating_action_button = None
 
         page.appbar.actions = audio_appbar_actions[target]
-        page.appbar.leading = screens_data[target]['leading']
+        if screens_data[target]['leading']['icon'] is not None:
+            page.appbar.leading = ft.IconButton(screens_data[target]['leading']['icon'], on_click=lambda _: change_screen(screens_data[target]['leading']['target']))
         page.appbar.title.value = screens_data[target]['title']
         page.scroll = screens_data[target]['scroll']
 
@@ -327,8 +221,12 @@ def main(page: ft.Page):
             },
         }
 
-        if target == "audio_main":
-            clients_list.controls.clear()
+        if target == "login":
+            page.appbar = None
+            page.add(ft.Container(login_col, expand=True))
+
+        elif target == "main":
+            clients_list = ft.Column()
             for index, c in enumerate(clients.items()):
                 client = c[1]
                 dialog_loading.content.controls[0].controls[0].value = f"Получение данных\n({client['title']})"
@@ -399,7 +297,7 @@ def main(page: ft.Page):
             close_dialog(dialog_loading)
             page.add(clients_list)
 
-        elif target == "audio_schedule":
+        elif target == "schedule":
             config = load_config()
             schedule = config['schedule']
 
@@ -432,14 +330,14 @@ def main(page: ft.Page):
                                                 ft.Container(
                                                     content=ft.ListTile(
                                                         title=ft.Text(f"{h}:{m}", size=18, weight=ft.FontWeight.W_400),
-                                                        subtitle=ft.Text(action[el['action']]['title'], size=16)
+                                                        subtitle=ft.Text(action[el['action']]['title'], size=18)
                                                     ),
                                                     expand=True,
                                                     padding=ft.padding.only(left=-15)
                                                 ),
                                                 ft.PopupMenuButton(
                                                     items=[
-                                                        ft.FilledButton(text='Редактировать', icon=ft.icons.EDIT, on_click=edit_timer, data=index),
+                                                        ft.FilledButton(text='Редактировать', icon=ft.icons.EDIT, on_click=goto_edittimer, data=index),
                                                         ft.Divider(thickness=1),
                                                         ft.FilledButton(text='Удалить', icon=ft.icons.DELETE, on_click=delete_timer, data=index),
                                                     ]
@@ -465,7 +363,7 @@ def main(page: ft.Page):
                 page.add(col)
             else:
                 page.add(ft.Text("Список расписания пуст", size=18, weight=ft.FontWeight.W_400))
-        elif target == "audio_settings":
+        elif target == "settings":
             pass
         elif target == "pick_folder":
             client_id = value
@@ -475,7 +373,7 @@ def main(page: ft.Page):
             listdir = get_yadisk_listdir()
 
             if listdir is not None:
-                col = ft.Column()
+                col = ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER)
                 col.controls.append(ft.Text('Выберите папку с музыкой', size=18, weight=ft.FontWeight.W_400))
                 listdir = [dir for dir in listdir if ".txt" not in dir['name']]
                 for dir in listdir:
@@ -498,7 +396,6 @@ def main(page: ft.Page):
             else:
                 open_sb("Ошибка при получении данных", ft.colors.RED)
             close_dialog(dialog_loading)
-
 
         elif target == "edit_timer":
             config = load_config()
@@ -573,8 +470,86 @@ def main(page: ft.Page):
             )
 
             page.add(col)
+        elif target == "new_timer":
+            timer_action_dd.value = None
+            timer_time_btn.content.value = "нажмите для выбора"
+            for loc in timer_locations.controls:
+                loc.controls[0].value = False
 
+            col = ft.Column(
+                controls=[
+                    ft.Card(
+                        ft.Container(
+                            content=ft.Row(
+                                [
+                                    ft.Text("Время", size=18, weight=ft.FontWeight.W_400), timer_time_btn
+                                ]
+                            ),
+                            padding=15
+                        ),
+                        elevation=5
+                    ),
+                    ft.Card(
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    ft.Text("Действие", size=18, weight=ft.FontWeight.W_400), timer_action_dd
+                                ],
+                                width=600
+                            ),
+                            padding=15
+                        ),
+                        elevation=5
+                    ),
+                    ft.Card(
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    ft.Text("Место", size=18, weight=ft.FontWeight.W_400), timer_locations
+                                ]
+                            ),
+                            padding=15
+                        ),
+                        elevation=5
+                    ),
+                    ft.Row([ft.FilledTonalButton(text="Сохранить", icon=ft.icons.SAVE, on_click=add_new_timer)], alignment=ft.MainAxisAlignment.END, width=600)
+                ],
+                width=600
+            )
+            page.add(col)
         page.update()
+
+    def add_new_timer(e: ft.ControlEvent):
+        config = load_config()
+        schedule = config['schedule']
+
+        sources = []
+        for location in timer_locations.controls:
+            if location.controls[0].value:
+                sources.append(location.controls[0].data)
+
+        if timer_action_dd.value == "play":
+            job = scheduler.add_job(play_music, 'cron', hour=timer_datepicker.value.hour, minute=timer_datepicker.value.minute)
+
+        elif timer_action_dd.value == "pause":
+            job = scheduler.add_job(stop_music, 'cron', hour=timer_datepicker.value.hour, minute=timer_datepicker.value.minute)
+
+        data = {
+            "time": {
+                "hour": timer_datepicker.value.hour,
+                "min": timer_datepicker.value.minute
+            },
+            "action": timer_action_dd.value,
+            "active": True,
+            "sources": sources,
+            "job_id": job.id
+        }
+
+        schedule.append(data)
+        config['schedule'] = schedule
+        update_config(config)
+        open_sb("Таймер создан", ft.colors.GREEN)
+        change_screen("schedule")
 
     def update_timer(e: ft.ControlEvent):
         timer_index = e.control.data
@@ -606,9 +581,9 @@ def main(page: ft.Page):
         scheduler.print_jobs()
         schedule[timer_index] = cur_timer
         config['schedule'] = schedule
-        update_config_file(config)
+        update_config(config)
 
-        change_screen('audio_schedule')
+        change_screen('schedule')
         open_sb("Таймер сохранён", ft.colors.GREEN)
 
     def send_new_path(e: ft.ControlEvent):
@@ -630,7 +605,7 @@ def main(page: ft.Page):
                 params=path
             )
         close_dialog(dialog_loading)
-        change_screen("audio_main")
+        change_screen("main")
 
     def datepicker_changed(e: ft.ControlEvent):
         time = e.control.value
@@ -648,7 +623,7 @@ def main(page: ft.Page):
     )
     page.overlay.append(timer_datepicker)
 
-    timer_time_btn = ft.TextButton(on_click=lambda _: timer_datepicker.pick_time(), content=ft.Text(size=18))
+    timer_time_btn = ft.TextButton(on_click=lambda _: timer_datepicker.pick_time(), content=ft.Text('нажмите для выбора', size=18))
     timer_action_dd = ft.Dropdown(
         options=[
             ft.dropdown.Option(text="Включить", key="play"),
@@ -681,22 +656,22 @@ def main(page: ft.Page):
     )
 
     def delete_timer(e: ft.ControlEvent):
-        config = load_config_file()
+        config = load_config()
 
         schedule = config['schedule']
         scheduler.remove_job(schedule[e.control.data]['job_id'])
 
         del schedule[e.control.data]
-        update_config_file(config)
+        update_config(config)
 
         open_sb("Таймер удалён")
-        change_screen("audio_schedule")
+        change_screen("schedule")
 
     def change_timer_status(e: ft.ControlEvent):
-        config = load_config_file()
+        config = load_config()
         schedule = config['schedule']
         schedule[e.control.data]['active'] = e.control.value
-        update_config_file(config)
+        update_config(config)
         job_id = schedule[e.control.data]['job_id']
         if e.control.value:
             try:
@@ -705,7 +680,7 @@ def main(page: ft.Page):
                 job = scheduler.add_job(play_music, 'cron', hour=schedule[e.control.data]['time']['hour'], minute=schedule[e.control.data]['time']['min'])
                 schedule[e.control.data]['job_id'] = job.id
                 config['schedule'] = schedule
-                update_config_file(config)
+                update_config(config)
 
             current_time = datetime.now()
             target_time = datetime(current_time.year, current_time.month, current_time.day, schedule[e.control.data]['time']['hour'], schedule[e.control.data]['time']['min'])
@@ -748,9 +723,8 @@ def main(page: ft.Page):
         page.snack_bar.open = True
         page.update()
 
-    def goto_audio_mode():
-        mode_bottomsheet.open = True
-        page.update()
+    def goto_edittimer(e: ft.ControlEvent):
+        change_screen("edit_timer", e.control.data)
 
     def get_client_info(client: str, params=None):
         data = {
@@ -830,7 +804,31 @@ def main(page: ft.Page):
             open_sb("Веб-сокет недоступен", ft.colors.RED)
             return False
 
-    change_screen('audio_main')
+    login_field = ft.TextField(
+        label="Код доступа", text_align=ft.TextAlign.CENTER,
+        width=250,
+        height=70,
+        on_submit=lambda _: login(),
+        keyboard_type=ft.KeyboardType.NUMBER,
+        password=True
+    )
+    button_login = ft.ElevatedButton("Войти", width=250, on_click=lambda _: login(),
+                                     disabled=False, height=50,
+                                     icon=ft.icons.KEYBOARD_ARROW_RIGHT_ROUNDED)
+    login_col = ft.Column(
+        controls=[
+            ft.Image(
+                src='icons/loading-animation.png',
+                height=200
+            ),
+            login_field,
+            button_login
+        ],
+        alignment=ft.MainAxisAlignment.CENTER,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER
+    )
+
+    change_screen('login')
 
 
 create_schedule()
@@ -840,8 +838,8 @@ if __name__ == '__main__':
         ft.app(
             target=main,
             assets_dir='assets',
-            port=8502,
-            view=ft.AppView.WEB_BROWSER
+            # port=8502,
+            # view=ft.AppView.WEB_BROWSER
         )
     elif platform.system() == "Linux":
         ft.app(

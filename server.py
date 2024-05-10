@@ -20,13 +20,13 @@ async def handler(websocket, path):
     except Exception:
         pass
     finally:
-        # print('ok')
         connected.remove(websocket)
 
 
 async def main():
-    async with websockets.serve(handler, "localhost", 8010):
-        logging.info("WebSocket server started and listening on ws://localhost:8010")
+    host, port = "localhost", 8010
+    async with websockets.serve(handler, host, port):
+        logging.info(f"WebSocket server started and listening on ws://{host}:{port}")
         await asyncio.Future()
 
 
