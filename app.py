@@ -20,6 +20,8 @@ else:
     env_path = r"/root/crod/.env"
 load_dotenv(dotenv_path=env_path)
 
+print(os.getenv('AUDIO_ACCESS_CODE'), os.getenv('YANDEX_REST_TOKEN'))
+
 ws_status = {'status': False, 'error': ""}
 ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
 
