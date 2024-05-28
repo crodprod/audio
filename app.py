@@ -13,7 +13,12 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from elements.screens import screens_data
 
-load_dotenv()
+
+if platform.system() == "Windows":
+    env_path = r"D:\CROD_MEDIA\.env"
+else:
+    env_path = r"/root/crod/.env"
+load_dotenv(dotenv_path=env_path)
 
 ws_status = {'status': False, 'error': ""}
 ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
