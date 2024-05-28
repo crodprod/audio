@@ -7,17 +7,19 @@ import time
 import subprocess
 
 import websockets.exceptions
-from pygame import mixer
+
+from colorama import init, Fore
+from colorama import Back
+from colorama import Style
+
 from websockets.sync.client import connect
 
-# script_path = os.path.abspath(__file__)
-# script_directory = os.path.dirname(script_path)
-# os.chdir(script_directory)
-# project_folder = os.getcwd()
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+from pygame import mixer
 
 mixer.init()
-ws_source = "wss://evolving-hedgehog-wholly.ngrok-free.app"
-# ws_source = "ws://localhost:8010"
+init(autoreset=True)
+ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
 
 pause = True
 playlist = []
@@ -28,14 +30,22 @@ current_filename = ""
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 
+
+def color_text(text: str, bg: Back = "", textcol: Fore = Fore.BLACK, style: Style = ""):
+    return bg + textcol + style + text + Style.RESET_ALL
+
+
+print(color_text("ВЕБ-СОКЕТ", style=Style.BRIGHT, textcol=Fore.RESET))
 connected = False
 while not connected:
     try:
-        print("\nПопытка подключения к вебсокету...")
+        print(color_text("Соединение с веб-сокетом...", Back.YELLOW))
+        # print(Back.YELLOW + "\nПопытка подключения к вебсокету...")
         ws = connect(ws_source, open_timeout=3, close_timeout=3)
+        print(color_text("Соединение с веб-сокетом установлено", Back.GREEN) + "\n")
         connected = True
     except Exception:
-        print("Неудачная попытка подключения к веб-сокету. Следующая попытка через 5 секунд...")
+        print(color_text("Соединение не установлено. Следующая попытка через 5 секунд...", Back.RED) + "\n")
         time.sleep(5)
 
 
@@ -267,12 +277,11 @@ def update_config(data):
         return json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+print(color_text("КОНФИГУРАЦИЯ", style=Style.BRIGHT, textcol=Fore.RESET))
 if not os.path.exists('audio_config'):
-    print("Создание папки конфигурации")
+    print(color_text("Создание папки конфигурации", Back.YELLOW))
     os.mkdir('audio_config')
-    while not os.path.exists('audio_config'):
-        print('создание...')
-        os.mkdir('audio_config')
+
     with open('audio_config/client_config.json', 'w') as f:
         data = {
             "volume": 0,
@@ -283,49 +292,45 @@ if not os.path.exists('audio_config'):
         }
         json.dump(data, f, indent=2, ensure_ascii=False)
         f.close()
-    # with open('audio_config/hot_restart.bat', 'w') as b:
-    #     lines = [
-    #         "@echo off",
-    #         "\ntimeout /t 5 /nobreak >nul",
-    #         "\n",
-    #         r'start "" "%~dp0\audio_client.exe"'
-    #     ]
-    #     b.writelines(lines)
-    #     b.close()
+    print(color_text("Папка конфигурации создана", Back.GREEN) + "\n")
 else:
-    print("Папка конфигурации обнаружена")
+    print(color_text("Папка конфигурации обнаружена", Back.GREEN) + "\n")
+
 config = get_config()
 
+print(color_text("ГРОМКОСТЬ", style=Style.BRIGHT, textcol=Fore.RESET))
 if config['volume'] > 0:
     mixer.music.set_volume(config['volume'])
+    print(color_text(f"Значение из конфигурации: {int(config['volume']) * 100}%", Back.GREEN) + "\n")
 else:
     mixer.music.set_volume(0.5)
     config['volume'] = 0.5
     update_config(config)
+    print(color_text("Стандартное значение: 50%", Back.GREEN) + "\n")
 
-print(f"\nГромкось: {int(config['volume'] * 100)}%")
-
+print(color_text("КОРНЕВАЯ ДИРЕКТОРИЯ", style=Style.BRIGHT, textcol=Fore.RESET))
 if config['rootdir']:
     root_directory = config['rootdir']
+    print(color_text(f"Значение из конфигурации: {config['rootdir']}", Back.GREEN) + "\n")
 else:
     root_ok = False
-    root_directory = input("Вставьте путь к папке \"CROD_MEDIA/Общие файлы/Audio\"\n>> ")
+    root_directory = input(color_text("Вставьте путь к папке \"CROD_MEDIA/Общие файлы/Audio\"", Back.YELLOW) + "\n>> ")
     while not root_ok:
         if os.path.exists(os.path.join(root_directory, 'checker.txt')):
             root_ok = True
         else:
-            root_directory = input(f"Путь {root_directory} не является корректным, повторите попытку\n>> ")
+            root_directory = input(color_text(f"Путь {root_directory} не является корректным, повторите попытку", Back.RED) + "\n>> ")
     config['rootdir'] = root_directory
     update_config(config)
+    print(color_text(f"Директория установлена: {root_directory}", Back.GREEN) + "\n")
 
-print(f"Корневая директория: {root_directory}")
-
+print(color_text("ТЕКУЩАЯ ДИРЕКТОРИЯ", style=Style.BRIGHT, textcol=Fore.RESET))
 if config['curdir']:
     current_directory = config['curdir']
-    print(f"Текущая директория: {current_directory}")
+    print(color_text(f"Значение из конфигурации: {current_directory}", Back.GREEN) + "\n")
 else:
     current_directory = ""
-    print(f"Текущая директория отсутствует, выберите её в Audio")
+    print(color_text(f"Текущая директория отсутствует, выберите её в Audio", Back.CYAN) + "\n")
 
 print("\nДля сброса параметров удалите папку audio_config")
 
