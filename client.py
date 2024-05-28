@@ -20,6 +20,7 @@ from pygame import mixer
 mixer.init()
 init(autoreset=True)
 ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
+# ws_source = "ws://localhost:8010"
 
 pause = True
 playlist = []
