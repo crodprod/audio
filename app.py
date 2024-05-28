@@ -214,6 +214,8 @@ def main(page: ft.Page):
         page.appbar.actions = audio_appbar_actions[target]
         if screens_data[target]['leading']['icon'] is not None:
             page.appbar.leading = ft.IconButton(screens_data[target]['leading']['icon'], on_click=lambda _: change_screen(screens_data[target]['leading']['target']))
+        else:
+            page.appbar.leading = None
         page.appbar.title.value = screens_data[target]['title']
         page.scroll = screens_data[target]['scroll']
 
