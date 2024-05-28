@@ -16,7 +16,7 @@ from elements.screens import screens_data
 load_dotenv()
 
 ws_status = {'status': False, 'error': ""}
-ws_source = "ws://localhost:8010"
+ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
