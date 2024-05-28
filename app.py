@@ -52,7 +52,7 @@ def get_yadisk_listdir(path: str = ""):
 
     headers = {
         'Accept': 'application/json',
-        'Authorization': f"OAuth {os.getenv('YANDEX_TOKEN')}"
+        'Authorization': f"OAuth {os.getenv('YANDEX_REST_TOKEN')}"
     }
 
     params = {
@@ -153,7 +153,7 @@ def main(page: ft.Page):
     )
 
     def login():
-        true_password = os.getenv('ACCESS_CODE')
+        true_password = os.getenv('AUDIO_ACCESS_CODE')
         if login_field.value == true_password:
             change_screen("main")
         else:
