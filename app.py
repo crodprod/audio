@@ -842,7 +842,7 @@ def main(page: ft.Page):
 
                 elif data['message'] == 'getinfo_answer':
                     clients_list.controls[c[0]].content.content.controls[0].controls[0].color = None
-                    if data['body']['current_filename'] and data['body']['msuic_status']:
+                    if data['body']['track'] and data['body']['msuic_status']:
                         track_name = data['body']['track'].split(".")[0]
 
                     else:
@@ -854,7 +854,7 @@ def main(page: ft.Page):
                     clients_list.controls[c[0]].content.content.controls[2].controls[0].value = "ничего не играет"
 
                 elif data['message'] == "play_answer":
-                    if data['body']['current_filename'] and data['body']['msuic_status']:
+                    if data['body']['track'] and data['body']['msuic_status']:
                         track_name = data['body']['track'].split(".")[0]
 
                     else:

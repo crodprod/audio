@@ -93,7 +93,7 @@ def ws_send(message: str, body: {}):
     try:
         data = json.dumps(data)
         ws.send(data)
-        print(f"Данные отправлены\n{data}")
+        print(f"<<< {data}")
     except ConnectionRefusedError:
         print("Веб-сокет недоступен")
         return False
@@ -102,7 +102,6 @@ def ws_send(message: str, body: {}):
 def ws_recieve():
     try:
         data = ws.recv()
-        # print("Данные получены")
         return data
     except Exception:
         return False
@@ -113,25 +112,6 @@ def ws_recieve():
         return False
     except websockets.exceptions.ConnectionClosedError:
         return False
-
-
-def start(try_num: int = 1):
-    receive_messages()
-    # print(f"Попытка подключения к веб-сокету #{try_num}...")
-    # if check_connection():
-    #     print("Соединение с веб-сокетом установлено")
-    #     receive_messages()
-    # else:
-    #     if try_num < 3:
-    #         print("Веб-сокет недоступен. Следующая попытка подкючения через 5 секунд")
-    #         time.sleep(5)
-    #         start(try_num+1)
-    #     else:
-    #         msg = input("Веб-сокет недоступен. Устраните ошибку и после этого отправьте 0\n>> ")
-    #         while msg != "0":
-    #             print("Некорректные данные")
-    #             msg = input("Устраните ошибку и после этого отправьте 0\n>> ")
-    #         start()
 
 
 def make_action(data: dict):
@@ -196,7 +176,8 @@ def make_action(data: dict):
             message='play_answer',
             body={
                 'status': status,
-                'track': current_filename
+                'track': current_filename,
+                'msuic_status': mixer.music.get_busy()
             }
         )
 
@@ -419,6 +400,6 @@ else:
 
 print(f"Выбран клиент: {clients[int(client_id)]}")
 
-start()
+receive_messages()
 
 ws.close()
