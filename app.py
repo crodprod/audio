@@ -77,7 +77,6 @@ def send_ws_data(client: str, action: str, params=None):
     data = json.dumps(data)
 
     ws.send(data)
-    print(f"sended: {data}")
 
 
 def play_music():
@@ -431,7 +430,6 @@ def main(page: ft.Page):
 
             timer_action_dd.value = cur_timer['action']
             h, m = "0" * (2 - len(str(cur_timer['time']['hour']))) + f"{cur_timer['time']['hour']}", "0" * (2 - len(str(cur_timer['time']['min']))) + f"{cur_timer['time']['min']}"
-            print(h, m)
             timer_time_btn.content.value = f"{h}:{m}"
 
             col = ft.Column(
