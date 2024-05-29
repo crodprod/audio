@@ -4,6 +4,7 @@ import os
 import platform
 import time
 import flet as ft
+import ntplib
 
 from requests import get
 from dotenv import load_dotenv
@@ -39,6 +40,12 @@ scheduler = BackgroundScheduler()
 def load_config():
     with open(file='config.json', mode='r', encoding='utf-8') as file:
         return json.load(file)
+
+
+def sync_time():
+    c = ntplib.NTPClient()
+    response = c.request('pool.ntp.org')
+    print(time.ctime(response.tx_time))
 
 
 def update_config(data):
@@ -617,7 +624,7 @@ def main(page: ft.Page):
                     action="simplesync",
                     params={
                         'path': path,
-                        'time': (datetime.now() + timedelta(seconds=5)).strftime('%Y-%m-%d-%H-%M-%S')
+                        'time': time.time() + 5
                     }
                 )
             open_sb("Синхронизация через 5 секунд")
@@ -862,13 +869,11 @@ def main(page: ft.Page):
                     clients_list.controls[c[0]].content.content.controls[2].controls[0].value = track_name
 
                 if data['message'] in ['prevtrack_answer', 'play_answer', 'pause_answer', 'nexttrack_answer', 'setvolume_answer']:
-
                     clients_list.controls[c[0]].content.content.controls[0].controls[0].color = ft.colors.GREEN
                     page.update()
                     time.sleep(1)
                     clients_list.controls[c[0]].content.content.controls[0].controls[0].color = None
                     page.update()
-
 
                 break
 
@@ -891,6 +896,7 @@ def main(page: ft.Page):
 create_schedule()
 
 if __name__ == '__main__':
+    sync_time()
     if platform.system() == "Windows":
         ft.app(
             target=main,

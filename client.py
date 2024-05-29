@@ -5,6 +5,7 @@ import os
 import sys
 import threading
 import time
+import ntplib
 
 import websockets.exceptions
 
@@ -49,6 +50,12 @@ while not connected:
     except Exception:
         print(color_text("Соединение не установлено. Следующая попытка через 5 секунд...", Back.RED) + "\n")
         time.sleep(5)
+
+
+def sync_time():
+    c = ntplib.NTPClient()
+    response = c.request('pool.ntp.org')
+    print(time.ctime(response.tx_time))
 
 
 def autonext():
@@ -134,10 +141,9 @@ def make_action(data: dict):
             make_action({'message': 'nexttrack'})
 
         elif data['message'] == "simplesync":
-            local_time = datetime.datetime.now()
-            while local_time < datetime.datetime.strptime(data['body']['time'], '%Y-%m-%d-%H-%M-%S'):
-                time.sleep(0.5)
-                local_time = datetime.datetime.now()
+            delay = data['body']['time'] - time.time()
+            if delay > 0:
+                time.sleep(delay)
             make_action({'message': 'nexttrack'})
 
     elif data['message'] == "getinfo":
@@ -399,7 +405,7 @@ else:
                           "\n>> ")
 
 print(f"Выбран клиент: {clients[int(client_id)]}")
-
+# sync_time()
 receive_messages()
 
 ws.close()
