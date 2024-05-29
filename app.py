@@ -624,10 +624,10 @@ def main(page: ft.Page):
                     action="simplesync",
                     params={
                         'path': path,
-                        'time': time.time() + 5
+                        'time': time.time() + 3
                     }
                 )
-            open_sb("Синхронизация через 5 секунд")
+            open_sb("Запуск синхронизации")
         else:
             send_data_to_ws(
                 client=client_id,

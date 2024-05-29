@@ -405,7 +405,7 @@ else:
                           "\n>> ")
 
 print(f"Выбран клиент: {clients[int(client_id)]}")
-sync_time()
+# sync_time()
 receive_messages()
 
 ws.close()
