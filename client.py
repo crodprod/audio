@@ -20,8 +20,8 @@ from pygame import mixer
 mixer.init()
 init(autoreset=True)
 
-# ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
-ws_source = "ws://localhost:8010"
+ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
+# ws_source = "ws://localhost:8010"
 
 pause = True
 playlist = []
@@ -167,7 +167,7 @@ def make_action(data: dict):
                 'volume': mixer.music.get_volume(),
                 'msuic_status': mixer.music.get_busy(),
                 'current_dir': current_directory,
-                'current_filename': current_filename
+                'track': current_filename
             }
         )
 
@@ -195,7 +195,8 @@ def make_action(data: dict):
         ws_send(
             message='play_answer',
             body={
-                'status': status
+                'status': status,
+                'track': current_filename
             }
         )
 

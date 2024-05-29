@@ -167,7 +167,7 @@ def main(page: ft.Page):
     }
 
     page.appbar = ft.AppBar(
-        title=ft.Text("Audio", size=20, weight=ft.FontWeight.W_400),
+        title=ft.Text("Audio", size=20, weight=ft.FontWeight.W_400)
     )
 
     def login():
@@ -843,7 +843,7 @@ def main(page: ft.Page):
                 elif data['message'] == 'getinfo_answer':
                     clients_list.controls[c[0]].content.content.controls[0].controls[0].color = None
                     if data['body']['current_filename'] and data['body']['msuic_status']:
-                        track_name = data['body']['current_filename'].split(".")[0]
+                        track_name = data['body']['track'].split(".")[0]
 
                     else:
                         track_name = "ничего не играет"
@@ -852,6 +852,14 @@ def main(page: ft.Page):
 
                 elif data['message'] == "pause_answer":
                     clients_list.controls[c[0]].content.content.controls[2].controls[0].value = "ничего не играет"
+
+                elif data['message'] == "play_answer":
+                    if data['body']['current_filename'] and data['body']['msuic_status']:
+                        track_name = data['body']['track'].split(".")[0]
+
+                    else:
+                        track_name = "ничего не играет"
+                    clients_list.controls[c[0]].content.content.controls[2].controls[0].value = track_name
 
                 if data['message'] in ['prevtrack_answer', 'play_answer', 'pause_answer', 'nexttrack_answer', 'setvolume_answer']:
 
