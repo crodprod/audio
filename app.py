@@ -19,11 +19,8 @@ else:
     env_path = r"/root/crod/.env"
 load_dotenv(dotenv_path=env_path)
 
-print(os.getenv('AUDIO_ACCESS_CODE'), os.getenv('YANDEX_REST_TOKEN'))
-
 ws_status = {'status': False, 'error': ""}
-# ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
-ws_source = "ws://localhost:8010"
+ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
@@ -798,7 +795,6 @@ def main(page: ft.Page):
 
         try:
             ws.send(data)
-            print(f"sended: {data}")
             return True
         except ConnectionRefusedError:
             open_sb("Веб-сокет недоступен", ft.colors.RED)
@@ -840,7 +836,6 @@ def main(page: ft.Page):
 
     def on_message_recieved(message: str):
         data = json.loads(message)
-        print(f"recieved: {message}")
 
         for index, c in enumerate(clients_indexation.items()):
             if c[1]['name'] == data['sender']:
@@ -875,7 +870,6 @@ def main(page: ft.Page):
 
     def recieve_messages():
         while True:
-            print('waiting')
             data = ws.recv()
             on_message_recieved(data)
             page.update()
