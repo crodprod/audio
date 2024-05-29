@@ -2,11 +2,9 @@ import datetime
 import json
 import logging
 import os
-import platform
 import sys
 import threading
 import time
-import subprocess
 
 import websockets.exceptions
 
@@ -66,7 +64,14 @@ def autonext():
                         current_filename = playlist[0]
                     else:
                         current_filename = playlist[index + 1]
-                    # print(f"new track: {current_filename}")
+                    print(f"Следующий трек: {current_filename}")
+                    ws_send(
+                        message="nexttrack_answer",
+                        body={
+                            'status': 'ok',
+                            'track': current_filename
+                        }
+                    )
                     mixer.music.load(os.path.join(current_directory, current_filename))
                     mixer.music.play()
                     break
@@ -77,24 +82,18 @@ auto_thread = threading.Thread(target=autonext)
 auto_thread.start()
 
 
-# def check_connection():
-#     try:
-#         ws = connect(ws_source, open_timeout=3, close_timeout=3)
-#         ws.close()
-#         return True
-#     except ConnectionRefusedError:
-#         return False
-
-
-def ws_send(input_data):
+def ws_send(message: str, body: {}):
     data = {
-        'client': clients[int(client_id)]['id'],
-        'action': json.dumps(input_data),
-        'params': None
+        "sender": clients[int(client_id)]['id'],
+        "recipient": "server",
+        'message': message,
+        'body': body
     }
+
     try:
-        ws.send(json.dumps(data))
-        print("Данные отправлены")
+        data = json.dumps(data)
+        ws.send(data)
+        print(f"Данные отправлены\n{data}")
     except ConnectionRefusedError:
         print("Веб-сокет недоступен")
         return False
@@ -136,115 +135,164 @@ def start(try_num: int = 1):
 
 
 def make_action(data: dict):
-    action, params = data['action'], data['params']
-    activity_flag = True
-
     global playlist
     global pause
     global global_last_volume  # храним в джейсоне
     global current_directory  # храним в джейсоне
     global current_filename
 
-    if activity_flag:
-        if action in ['setdir', 'simplesync']:
-            data = json.loads(params)
-            playlist = []
-            current_directory = f"{root_directory}\\{data['path']}"
-            config = get_config()
-            config['curdir'] = f"{root_directory}\\{data['path']}"
-            update_config(config)
-            print(f'Новая директория: {current_directory}')
+    if data['message'] in ['setdir', 'simplesync']:
 
-            if action == 'setdir':
-                make_action({'action': 'nexttrack', 'params': None})
-            elif action == "simplesync":
+        playlist = []
+        current_directory = f"{root_directory}\\{data['body']['path']}"
+        config = get_config()
+        config['curdir'] = f"{root_directory}\\{data['body']['path']}"
+        update_config(config)
+        print(f'Новая директория: {current_directory}')
+
+        if data['message'] == 'setdir':
+            make_action({'message': 'nexttrack'})
+
+        elif data['message'] == "simplesync":
+            local_time = datetime.datetime.now()
+            while local_time < datetime.datetime.strptime(data['body']['time'], '%Y-%m-%d-%H-%M-%S'):
+                time.sleep(0.5)
                 local_time = datetime.datetime.now()
-                print(local_time, datetime.datetime.strptime(data['time'], '%Y-%m-%d-%H-%M-%S'))
-                while local_time < datetime.datetime.strptime(data['time'], '%Y-%m-%d-%H-%M-%S'):
-                    print("ожидание...")
-                    time.sleep(1)
-                    local_time = datetime.datetime.now()
-                make_action({'action': 'nexttrack', 'params': None})
+            make_action({'message': 'nexttrack'})
 
-        elif action == "getinfo":
-            ws_send(json.dumps({'vol': mixer.music.get_volume(), 'status': mixer.music.get_busy()}))
+    elif data['message'] == "getinfo":
+        ws_send(
+            message='getinfo_answer',
+            body={
+                'volume': mixer.music.get_volume(),
+                'msuic_status': mixer.music.get_busy(),
+                'current_dir': current_directory,
+                'current_filename': current_filename
+            }
+        )
 
-        elif action == "pause":
-            pause = True
-            mixer.music.pause()
-            print("Пауза")
+    elif data['message'] == "pause":
+        pause = True
+        mixer.music.pause()
+        print("Пауза")
+        ws_send(
+            message='pause_answer',
+            body={
+                'status': 'ok'
+            }
+        )
 
-        elif action == "play":
-            if current_directory:
+    elif data['message'] == "play":
+        if current_directory:
+            status = 'ok'
+            pause = False
+            mixer.music.unpause()
+            print("Воспроизведение")
+        else:
+            status = 'empty_dir'
+            print("Текущая директория отсутствует")
+
+        ws_send(
+            message='play_answer',
+            body={
+                'status': status
+            }
+        )
+
+    elif data['message'] == "setvolume":
+        vol = data['body']['volume']
+        mixer.music.set_volume(float(vol))
+
+        config = get_config()
+        config['volume'] = float(vol)
+        update_config(config)
+
+        print(f"Установлена громкость: {float(vol) * 100}%")
+        ws_send(
+            message='setvolume_answer',
+            body={
+                'status': 'ok'
+            }
+        )
+
+    elif data['message'] == 'nexttrack':
+        if current_directory:
+            status = 'ok'
+            if playlist:
+                playlist = [el for el in os.listdir(current_directory) if el.endswith('.mp3')]
+                for index, filename in enumerate(playlist):
+                    if filename == current_filename:
+                        if index + 1 == len(playlist):
+                            current_filename = playlist[0]
+                        else:
+                            current_filename = playlist[index + 1]
+                        print(f"Следующий трек: {current_filename}")
+                        mixer.music.load(os.path.join(current_directory, current_filename))
+                        mixer.music.play()
+                        pause = False
+                        break
+            else:
+                playlist = [el for el in os.listdir(current_directory) if el.endswith('.mp3')]
+                current_filename = playlist[0]
+                mixer.music.load(os.path.join(current_directory, playlist[0]))
+                mixer.music.play()
                 pause = False
-                mixer.music.unpause()
-                print("Воспроизведение")
-            else:
-                print("Текущая директория отсутствует")
+        else:
+            status = 'empty_dir'
+            print("Текущая директория отсутствует")
 
-        elif action == "setvolume":
-            mixer.music.set_volume(float(params))
-            config = get_config()
-            config['volume'] = float(params)
-            update_config(config)
-            print(f"Установлена громкость: {float(params) * 100}%")
+        ws_send(
+            message='nexttrack_answer',
+            body={
+                'status': status,
+                'track': current_filename
+            }
+        )
 
-        elif action == 'nexttrack':
-            if current_directory:
-                if playlist:
-                    playlist = [el for el in os.listdir(current_directory) if el.endswith('.mp3')]
-                    for index, filename in enumerate(playlist):
-                        if filename == current_filename:
-                            if index + 1 == len(playlist):
-                                current_filename = playlist[0]
-                            else:
-                                current_filename = playlist[index + 1]
-                            print(f"Следующий трек: {current_filename}")
-                            mixer.music.load(os.path.join(current_directory, current_filename))
-                            mixer.music.play()
-                            pause = False
-                            break
-                else:
-                    playlist = [el for el in os.listdir(current_directory) if el.endswith('.mp3')]
-                    current_filename = playlist[0]
-                    mixer.music.load(os.path.join(current_directory, playlist[0]))
-                    mixer.music.play()
-                    pause = False
+    elif data['message'] == "prevtrack":
+        if current_directory:
+            status = 'ok'
+            if playlist:
+                playlist = [el for el in os.listdir(current_directory) if el.endswith('.mp3')]
+                for index, filename in enumerate(playlist):
+                    if filename == current_filename:
+                        if index == 0:
+                            current_filename = playlist[-1]
+                        else:
+                            current_filename = playlist[index - 1]
+                        print(f"Предыдущий трек: {current_filename}")
+                        mixer.music.load(os.path.join(current_directory, current_filename))
+                        mixer.music.play()
+                        pause = False
+                        break
             else:
-                print("Текущая директория отсутствует")
-        elif action == "prevtrack":
-            if current_directory:
-                if playlist:
-                    playlist = [el for el in os.listdir(current_directory) if el.endswith('.mp3')]
-                    for index, filename in enumerate(playlist):
-                        if filename == current_filename:
-                            if index == 0:
-                                current_filename = playlist[-1]
-                            else:
-                                current_filename = playlist[index - 1]
-                            print(f"Предыдущий трек: {current_filename}")
-                            mixer.music.load(os.path.join(current_directory, current_filename))
-                            mixer.music.play()
-                            pause = False
-                            break
-                else:
-                    playlist = [el for el in os.listdir(current_directory) if el.endswith('.mp3')]
-                    current_filename = playlist[0]
-                    mixer.music.load(os.path.join(current_directory, playlist[0]))
-                    mixer.music.play()
-                    pause = False
-            else:
-                print("Текущая директория отсутствует")
+                playlist = [el for el in os.listdir(current_directory) if el.endswith('.mp3')]
+                current_filename = playlist[0]
+                mixer.music.load(os.path.join(current_directory, playlist[0]))
+                mixer.music.play()
+                pause = False
+        else:
+            status = 'empty_dir'
+            print("Текущая директория отсутствует")
+
+        ws_send(
+            message='prevtrack_answer',
+            body={
+                'status': status,
+                'track': current_filename
+            }
+        )
 
 
 def receive_messages():
+    make_action({'message': 'getinfo'})
     print("Клиент запущен. Ожидание команды от Audio...")
     global global_client_id
     while True:
         msg = ws_recieve()
         if msg is not False:
             data = json.loads(msg)
-            if data['client'] == clients[int(client_id)]['id']:
+            if data['recipient'] == clients[int(client_id)]['id']:
                 print(f">>> {data}")
                 make_action(data)
         else:
@@ -278,7 +326,6 @@ def reboot():
     config['autorestart'] = True
     config['client_id'] = client_id
     update_config(config)
-    # subprocess.Popen([f"{project_folder}/audio_config/hot_restart.bat"], creationflags=subprocess.CREATE_NEW_CONSOLE)
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
 

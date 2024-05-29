@@ -13,7 +13,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from elements.screens import screens_data
 
-
 if platform.system() == "Windows":
     env_path = r"D:\CROD_MEDIA\.env"
 else:
@@ -70,16 +69,18 @@ def get_yadisk_listdir(path: str = ""):
         return None
 
 
-def send_data_to_ws(client: str, action: str, params=None):
-    if params:
-        params = str(params)
-
+def send_ws_data(client: str, action: str, params=None):
     data = {
-        'client': client,
-        'action': action,
-        'params': params
+        "sender": "server",
+        "recipient": client,
+        'message': action,
+        'body': params
     }
-    ws.send(json.dumps(data))
+
+    data = json.dumps(data)
+
+    ws.send(data)
+    print(f"sended: {data}")
 
 
 def play_music():
@@ -89,7 +90,7 @@ def play_music():
         hour, minute = time.hour, time.minute
         if el['time']['hour'] == hour and el['time']['min'] == minute:
             for source in el['sources']:
-                send_data_to_ws(source, 'nexttrack')
+                send_ws_data(source, 'nexttrack')
 
 
 def stop_music():
@@ -99,7 +100,7 @@ def stop_music():
         hour, minute = time.hour, time.minute
         if el['time']['hour'] == hour and el['time']['min'] == minute:
             for source in el['sources']:
-                send_data_to_ws(source, 'pause')
+                send_ws_data(source, 'pause')
 
 
 def create_schedule():
@@ -133,6 +134,24 @@ def main(page: ft.Page):
     if platform.system() == "Windows":
         page.window_width = 377
         page.window_height = 768
+
+    clients_indexation = {
+        0: {
+            'name': 'sumstage',
+            'title': 'Летняя сцена',
+            'icon': ft.icons.SPEAKER
+        },
+        1: {
+            'name': 'territory',
+            'title': 'Территория',
+            'icon': ft.icons.TERRAIN
+        },
+        2: {
+            'name': 'conference',
+            'title': 'Конференц-зал',
+            'icon': ft.icons.CONTROL_CAMERA
+        },
+    }
 
     page.title = "Audio"
 
@@ -203,9 +222,17 @@ def main(page: ft.Page):
         if action in ['play', 'pause', 'prevtrack', 'nexttrack']:
             response = send_data_to_ws(client, action)
         elif action == "setvolume":
-            send_data_to_ws(client, action, int(e.control.value) / 100)
+            send_data_to_ws(
+                client=client,
+                action=action,
+                params={
+                    'volume': int(e.control.value) / 100
+                }
+            )
 
         page.update()
+
+    clients_list = ft.Column()
 
     def change_screen(target: str, value=None):
         page.controls.clear()
@@ -220,47 +247,21 @@ def main(page: ft.Page):
         page.appbar.title.value = screens_data[target]['title']
         page.scroll = screens_data[target]['scroll']
 
-        clients = {
-            0: {
-                'name': 'sumstage',
-                'title': 'Летняя сцена',
-                'icon': ft.icons.SPEAKER
-            },
-            1: {
-                'name': 'territory',
-                'title': 'Территория',
-                'icon': ft.icons.TERRAIN
-            },
-            2: {
-                'name': 'conference',
-                'title': 'Конференц-зал',
-                'icon': ft.icons.CONTROL_CAMERA
-            },
-        }
-
         if target == "login":
             page.appbar.visible = False
             page.add(ft.Container(login_col, expand=True))
 
         elif target == "main":
-            clients_list = ft.Column()
-            for index, c in enumerate(clients.items()):
+            clients_list.controls.clear()
+            for index, c in enumerate(clients_indexation.items()):
                 client = c[1]
-                dialog_loading.content.controls[0].controls[0].value = f"Получение данных\n({client['title']})"
-                open_dialog(dialog_loading)
-                client_info = get_client_info(client['name'])
-                # client_info = False
-                # print(client)
-                if client_info is not False:
-                    client_info = json.loads(client_info)
 
-                    color = ft.colors.GREEN
-                    vol_value = client_info['vol'] * 100
-                    # btn_pause_visible = client_info['status']
-                else:
-                    color = ft.colors.RED
-                    vol_value = 20
-                    # btn_pause_visible = False
+                send_data_to_ws(
+                    client=client['name'],
+                    action="getinfo",
+                    params={}
+                )
+                color = ft.colors.RED
 
                 client_card = ft.Card(
                     ft.Container(
@@ -285,11 +286,17 @@ def main(page: ft.Page):
                                 ),
                                 ft.Row(
                                     controls=[
+                                        ft.Text("Ничего не играет", size=16, weight=ft.FontWeight.W_200, text_align=ft.TextAlign.CENTER)
+                                    ],
+                                    alignment=ft.MainAxisAlignment.CENTER
+                                ),
+                                ft.Row(
+                                    controls=[
                                         ft.Icon(ft.icons.VOLUME_UP),
                                         ft.Container(
                                             ft.Slider(
                                                 # min=0, max=100, divisions=20, label="{value}%", value=int(float(clients_info[index]['volume']) * 100), width=320, tooltip="Громкость",
-                                                min=0, max=100, divisions=100, label="{value}%", value=vol_value, tooltip="Громкость",
+                                                min=0, max=100, divisions=100, label="{value}%", value=0, tooltip="Громкость",
                                                 data=f"setvolume_{client['name']}_{index}",
                                                 on_change_end=send_action,
                                                 expand=True
@@ -311,7 +318,7 @@ def main(page: ft.Page):
                     data=client['name']
                 )
                 clients_list.controls.append(client_card)
-            close_dialog(dialog_loading)
+            # close_dialog(dialog_loading)
             page.add(clients_list)
 
         elif target == "schedule":
@@ -391,7 +398,7 @@ def main(page: ft.Page):
 
             if listdir is not None:
                 col = ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER)
-                col.controls.append(ft.Text('Выберите папку с музыкой', size=18, weight=ft.FontWeight.W_400))
+                col.controls.append(ft.Text('Выберите папку с музыкой', size=18, weight=ft.FontWeight.W_200))
                 listdir = [dir for dir in listdir if ".txt" not in dir['name']]
                 for dir in listdir:
                     col.controls.append(
@@ -613,13 +620,19 @@ def main(page: ft.Page):
                 send_data_to_ws(
                     client=cid,
                     action="simplesync",
-                    params=json.dumps({"path": path, "time": (datetime.now() + timedelta(seconds=3)).strftime('%Y-%m-%d-%H-%M-%S')})
+                    params={
+                        'path': path,
+                        'time': (datetime.now() + timedelta(seconds=5)).strftime('%Y-%m-%d-%H-%M-%S')
+                    }
                 )
+            open_sb("Синхронизация через 5 секунд")
         else:
             send_data_to_ws(
                 client=client_id,
                 action="setdir",
-                params=path
+                params={
+                    'path': path
+                }
             )
         close_dialog(dialog_loading)
         change_screen("main")
@@ -743,37 +756,6 @@ def main(page: ft.Page):
     def goto_edittimer(e: ft.ControlEvent):
         change_screen("edit_timer", e.control.data)
 
-    def get_client_info(client: str, params=None):
-        data = {
-            'client': client,
-            'action': 'getinfo',
-            'params': params
-        }
-        try:
-            # ws = connect(ws_source, open_timeout=3, close_timeout=3)
-            ws.send(json.dumps(data))
-
-            try:
-                fl = False
-                while not fl:
-                    msg = ws.recv(timeout=3)
-                    data = json.loads(msg)
-                    if data['client'] == client:
-                        return json.loads(data['action'])
-                    fl = True
-                    # ws.close()
-            except TimeoutError:
-                open_sb(f"{client} недоступен ", ft.colors.RED)
-                # ws.close()
-                return False
-            except Exception:
-                # ws.close()
-                return False
-
-        except ConnectionRefusedError:
-            open_sb("Веб-сокет недоступен", ft.colors.RED)
-            return False
-
     loading_text = ft.Text("Загрузка", size=20, weight=ft.FontWeight.W_400)
     dialog_loading = ft.AlertDialog(
         # Диалог с кольцом загрузки
@@ -805,17 +787,18 @@ def main(page: ft.Page):
         page.update()
 
     def send_data_to_ws(client: str, action: str, params=None):
-        if params:
-            params = str(params)
         data = {
-            'client': client,
-            'action': action,
-            'params': params
+            "sender": "server",
+            "recipient": client,
+            'message': action,
+            'body': params
         }
+
+        data = json.dumps(data)
+
         try:
-            # ws = connect(ws_source, open_timeout=3, close_timeout=3)
-            ws.send(json.dumps(data))
-            # ws.close()
+            ws.send(data)
+            print(f"sended: {data}")
             return True
         except ConnectionRefusedError:
             open_sb("Веб-сокет недоступен", ft.colors.RED)
@@ -855,8 +838,51 @@ def main(page: ft.Page):
         )
     )
 
+    def on_message_recieved(message: str):
+        data = json.loads(message)
+        print(f"recieved: {message}")
+
+        for index, c in enumerate(clients_indexation.items()):
+            if c[1]['name'] == data['sender']:
+                if data['message'] == 'nexttrack_answer' or data['message'] == 'prevtrack_answer':
+                    clients_list.controls[c[0]].content.content.controls[2].controls[0].value = data['body']['track'].split(".")[0]
+
+                elif data['message'] == 'getinfo_answer':
+                    clients_list.controls[c[0]].content.content.controls[0].controls[0].color = None
+                    if data['body']['current_filename'] and data['body']['msuic_status']:
+                        track_name = data['body']['current_filename'].split(".")[0]
+
+                    else:
+                        track_name = "ничего не играет"
+                    clients_list.controls[c[0]].content.content.controls[2].controls[0].value = track_name
+                    clients_list.controls[c[0]].content.content.controls[3].controls[1].content.value = data['body']['volume'] * 100
+
+                elif data['message'] == "pause_answer":
+                    clients_list.controls[c[0]].content.content.controls[2].controls[0].value = "ничего не играет"
+
+                if data['message'] in ['prevtrack_answer', 'play_answer', 'pause_answer', 'nexttrack_answer', 'setvolume_answer']:
+
+                    clients_list.controls[c[0]].content.content.controls[0].controls[0].color = ft.colors.GREEN
+                    page.update()
+                    time.sleep(1)
+                    clients_list.controls[c[0]].content.content.controls[0].controls[0].color = None
+                    page.update()
+
+
+                break
+
+        page.update()
+
+    def recieve_messages():
+        while True:
+            print('waiting')
+            data = ws.recv()
+            on_message_recieved(data)
+            page.update()
+
     if ws_status['status']:
         change_screen('login')
+        page.run_thread(recieve_messages)
     else:
         dialog_info.content = ft.Text(f"Не удалось подключиться к веб-сокету. Перезагрузите его через Коннект и попробуйте ещё раз.\n\nОшибка: {ws_status['error']}", size=17)
         open_dialog(dialog_info)
