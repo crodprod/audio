@@ -289,7 +289,7 @@ def main(page: ft.Page):
                                 ),
                                 ft.Row(
                                     controls=[
-                                        ft.Text("Ничего не играет", size=16, weight=ft.FontWeight.W_200, text_align=ft.TextAlign.CENTER)
+                                        ft.Text("клиент недоступен", size=16, weight=ft.FontWeight.W_200, text_align=ft.TextAlign.CENTER)
                                     ],
                                     alignment=ft.MainAxisAlignment.CENTER
                                 ),
