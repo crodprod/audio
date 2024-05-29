@@ -624,7 +624,7 @@ def main(page: ft.Page):
                     action="simplesync",
                     params={
                         'path': path,
-                        'time': time.time() + 10
+                        'time': time.time() + 5
                     }
                 )
             open_sb("Синхронизация через 5 секунд")
