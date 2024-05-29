@@ -4,3 +4,5 @@ requests==2.31.0
 websockets==11.0.3
 python-dotenv==1.0.1
 pygame==2.5.2
+colorama==0.4.6
+ntplib==0.4.0
