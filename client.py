@@ -1,6 +1,8 @@
+import datetime
 import json
 import logging
 import os
+import platform
 import sys
 import threading
 import time
@@ -19,8 +21,9 @@ from pygame import mixer
 
 mixer.init()
 init(autoreset=True)
-ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
-# ws_source = "ws://localhost:8010"
+
+# ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
+ws_source = "ws://localhost:8010"
 
 pause = True
 playlist = []
@@ -143,14 +146,25 @@ def make_action(data: dict):
     global current_filename
 
     if activity_flag:
-        if action == "setdir":
+        if action in ['setdir', 'simplesync']:
+            data = json.loads(params)
             playlist = []
-            current_directory = f"{root_directory}\\{params}"
+            current_directory = f"{root_directory}\\{data['path']}"
             config = get_config()
-            config['curdir'] = f"{root_directory}\\{params}"
+            config['curdir'] = f"{root_directory}\\{data['path']}"
             update_config(config)
             print(f'Новая директория: {current_directory}')
-            make_action({'action': 'nexttrack', 'params': None})
+
+            if action == 'setdir':
+                make_action({'action': 'nexttrack', 'params': None})
+            elif action == "simplesync":
+                local_time = datetime.datetime.now()
+                print(local_time, datetime.datetime.strptime(data['time'], '%Y-%m-%d-%H-%M-%S'))
+                while local_time < datetime.datetime.strptime(data['time'], '%Y-%m-%d-%H-%M-%S'):
+                    print("ожидание...")
+                    time.sleep(1)
+                    local_time = datetime.datetime.now()
+                make_action({'action': 'nexttrack', 'params': None})
 
         elif action == "getinfo":
             ws_send(json.dumps({'vol': mixer.music.get_volume(), 'status': mixer.music.get_busy()}))

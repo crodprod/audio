@@ -23,7 +23,8 @@ load_dotenv(dotenv_path=env_path)
 print(os.getenv('AUDIO_ACCESS_CODE'), os.getenv('YANDEX_REST_TOKEN'))
 
 ws_status = {'status': False, 'error': ""}
-ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
+# ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
+ws_source = "ws://localhost:8010"
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
@@ -611,8 +612,8 @@ def main(page: ft.Page):
             for cid in ['sumstage', 'territory', 'conference']:
                 send_data_to_ws(
                     client=cid,
-                    action="setdir",
-                    params=path
+                    action="simplesync",
+                    params=json.dumps({"path": path, "time": (datetime.now() + timedelta(seconds=3)).strftime('%Y-%m-%d-%H-%M-%S')})
                 )
         else:
             send_data_to_ws(
