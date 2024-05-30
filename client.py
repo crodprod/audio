@@ -128,8 +128,7 @@ def make_action(data: dict):
     global current_directory  # храним в джейсоне
     global current_filename
 
-    if data['message'] in ['setdir', 'simplesync']:
-
+    if data['message'] == "setdir":
         playlist = []
         current_directory = f"{root_directory}\\{data['body']['path']}"
         config = get_config()
@@ -137,11 +136,11 @@ def make_action(data: dict):
         update_config(config)
         print(f'Новая директория: {current_directory}')
 
-        if data['message'] == "simplesync":
-            delay = data['body']['time'] - time.time()
-            print(delay)
-            if delay > 0:
-                time.sleep(delay)
+        # if data['message'] == "simplesync":
+        #     delay = data['body']['time'] - time.time()
+        #     print(delay)
+        #     if delay > 0:
+        #         time.sleep(delay + 0.6)
 
         if data['body']['type'] == "folder":
             print('Запуск папки')
@@ -149,6 +148,16 @@ def make_action(data: dict):
         elif data['body']['type'] == "file":
             print('Запуск файла')
             make_action({'message': 'nexttrack', 'track': data['body']['file']})
+
+    elif data['message'] == "simplesync":
+        params = data['body']
+
+        delay = params['time'] - time.time()
+        if delay > 0:
+            time.sleep(delay + 0.6)
+
+        action = params['action']
+        make_action({'message': action, 'track': data['body']['file']})
 
     elif data['message'] == "getinfo":
         ws_send(
@@ -416,7 +425,7 @@ else:
                           "\n>> ")
 
 print(f"Выбран клиент: {clients[int(client_id)]}")
-sync_time()
+# sync_time()
 receive_messages()
 
 ws.close()
