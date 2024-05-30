@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -34,6 +35,7 @@ try:
 except Exception as e:
     ws_status['status'] = False
     ws_status['error'] = e
+
 scheduler = BackgroundScheduler()
 
 
@@ -45,7 +47,7 @@ def load_config():
 def sync_time():
     c = ntplib.NTPClient()
     response = c.request('pool.ntp.org')
-    print(time.ctime(response.tx_time))
+    logging.info(f"NTP: current server time: {response}")
 
 
 def update_config(data):
@@ -67,9 +69,12 @@ def get_yadisk_listdir(path: str = ""):
 
     response = get(url=url, headers=headers, params=params)
 
+    logging.info(f"YandexAPI: requesting (headers: {headers}, params: {params})")
     if response.status_code == 200:
+        logging.info(f"YandexAPI: response ok ({response.json()['_embedded']['items']})")
         return response.json()['_embedded']['items']
     else:
+        logging.error(f"YandexAPI: {response.json()}")
         return None
 
 
@@ -82,8 +87,8 @@ def send_ws_data(client: str, action: str, params=None):
     }
 
     data = json.dumps(data)
-
     ws.send(data)
+    logging.info(f"WebSocket: sended {data}")
 
 
 def play_music():
@@ -106,6 +111,26 @@ def stop_music():
                 send_ws_data(source, 'pause')
 
 
+def play_track():
+    schedule = load_config()['schedule']
+    for el in schedule:
+        time = datetime.now().time()
+        hour, minute = time.hour, time.minute
+        if el['time']['hour'] == hour and el['time']['min'] == minute:
+            print(el)
+            for source in el['sources']:
+                send_ws_data(source, 'pause')
+                send_ws_data(
+                    client=source,
+                    action="setdir",
+                    params={
+                        'type': "file",
+                        'path': el['path'],
+                        'file': el['file']
+                    }
+                )
+
+
 def create_schedule():
     config = load_config()
     schedule = config['schedule']
@@ -123,6 +148,9 @@ def create_schedule():
 
             elif action == "pause":
                 job = scheduler.add_job(stop_music, 'cron', hour=hour, minute=minute)
+
+            elif action == "play_track":
+                job = scheduler.add_job(play_track, 'cron', hour=hour, minute=minute)
             el['job_id'] = job.id
             schedule[index] = el
 
@@ -153,7 +181,7 @@ def main(page: ft.Page):
             'name': 'conference',
             'title': 'Конференц-зал',
             'icon': ft.icons.CONTROL_CAMERA
-        },
+        }
     }
 
     page.title = "Audio"
@@ -180,14 +208,116 @@ def main(page: ft.Page):
     def login():
         true_password = os.getenv('AUDIO_ACCESS_CODE')
         if login_field.value == true_password:
+            page.run_thread(recieve_messages)
             change_screen("main")
         else:
-            open_sb("Неверный код")
+            open_sb("Неверный код", ft.colors.RED)
         login_field.value = ""
         page.update()
 
-    def goto_pick_folder(e: ft.ControlEvent):
-        change_screen("pick_folder", e.control.data)
+    def update_timer_track_btn(e: ft.ControlEvent):
+        data = e.control.data
+        timer_action_select_track_btn.data = {'path': data['path'], 'file': data['file']}
+        timer_action_select_track_btn.text = data['file']
+
+        bs_pick_music.open = False
+        page.update()
+
+    def show_folder_content(e: ft.ControlEvent):
+        data = e.control.data
+        bs_pick_music_content.controls.clear()
+        bs_pick_music_progress.visible = True
+        page.update()
+
+        bs_pick_music_content.controls.append(
+            ft.ListTile(
+                leading=ft.Icon(ft.icons.ARROW_BACK),
+                title=ft.Text("Назад"),
+                on_click=select_folder,
+                data=data['client_id']
+            ),
+        )
+
+        files_list = get_yadisk_listdir(data['path'])
+        if files_list is not None:
+            files_list = [file for file in files_list if file['type'] == "file" and file['name'].endswith('.mp3')]
+        else:
+            close_bottom_sheet(bs_pick_music)
+            open_banner("Диск недоступен", ft.colors.RED)
+
+        if files_list:
+            for file in files_list:
+                if data['client_id'] == "for_timer":
+                    tile = ft.ListTile(
+                        leading=ft.Icon(ft.icons.AUDIO_FILE),
+                        title=ft.Text(file['name']),
+                        on_click=update_timer_track_btn,
+                        data={'path': data['path'], 'file': file['name']}
+                    )
+                else:
+                    tile = ft.ListTile(
+                        leading=ft.Icon(ft.icons.AUDIO_FILE),
+                        title=ft.Text(file['name']),
+                        on_click=send_new_path,
+                        data={'client_id': data['client_id'], 'path': data['path'], 'file': file['name'], 'type': "file"}
+                    )
+                bs_pick_music_content.controls.append(ft.Row([ft.Container(tile, expand=True)]))
+        else:
+            bs_pick_music_content.controls.append(
+                ft.Row(
+                    [
+                        ft.Text("В этой папке ничего нет", text_align=ft.TextAlign.CENTER, size=16, weight=ft.FontWeight.W_200),
+                    ],
+                    alignment=ft.MainAxisAlignment.CENTER
+                )
+            )
+
+        bs_pick_music_progress.visible = False
+        page.update()
+
+    def select_folder(e: ft.ControlEvent):
+        bs_pick_music_progress.visible = True
+        page.bottom_sheet = bs_pick_music
+        bs_pick_music.open = True
+        bs_pick_music_content.controls.clear()
+        page.update()
+
+        listdir = get_yadisk_listdir()
+        if listdir is not None:
+            listdir = [dir for dir in listdir if dir['type'] == "dir"]
+        else:
+            close_bottom_sheet(bs_pick_music)
+            open_banner("Диск недоступен", ft.colors.RED)
+
+        if listdir:
+            for dir in listdir:
+                print({'client_id': e.control.data, 'path': dir['name']})
+                bs_pick_music_content.controls.append(
+                    ft.Row(
+                        [
+                            ft.Container(
+                                ft.ListTile(
+                                    leading=ft.Icon(ft.icons.FOLDER),
+                                    title=ft.Text(dir['name']),
+                                    on_click=show_folder_content,
+                                    data={'client_id': e.control.data, 'path': dir['name']}
+                                ),
+                                expand=True
+                            )
+                        ]
+                    )
+                )
+            bs_pick_music_progress.visible = False
+            page.update()
+        else:
+            bs_pick_music_content.controls.append(
+                ft.Row(
+                    [
+                        ft.Text("Список папок отсутствует", text_align=ft.TextAlign.CENTER, size=16, weight=ft.FontWeight.W_200),
+                    ],
+                    alignment=ft.MainAxisAlignment.CENTER
+                )
+            )
 
     audio_appbar_actions = {
         'login': None,
@@ -195,15 +325,14 @@ def main(page: ft.Page):
             ft.Container(
                 ft.Row(
                     [
-                        ft.IconButton(ft.icons.MULTITRACK_AUDIO, on_click=goto_pick_folder, data='all', tooltip="Синхронизация"),
-                        ft.IconButton(ft.icons.UPDATE, on_click=lambda _: change_screen("main"), tooltip="Обновить"),
+                        ft.IconButton(ft.icons.MULTITRACK_AUDIO, on_click=select_folder, data='all', tooltip="Синхронизация"),
+                        ft.IconButton(ft.icons.RESTART_ALT, on_click=lambda _: change_screen("main"), tooltip="Обновить"),
                         ft.IconButton(icon=ft.icons.SCHEDULE, on_click=lambda _: change_screen('schedule'), tooltip="Расписание"),
                     ]
                 ),
                 margin=ft.margin.only(right=10)
             )
         ],
-        'settings': None,
         'schedule': [
             ft.Container(
                 ft.Row(
@@ -223,7 +352,11 @@ def main(page: ft.Page):
         data = e.control.data.split("_")
         action, client, card_index = (data[0], data[1], int(data[2]))
         if action in ['play', 'pause', 'prevtrack', 'nexttrack']:
-            response = send_data_to_ws(client, action)
+            if client == "all":
+                for cid in ['sumstage', 'territory', 'conference']:
+                    send_data_to_ws(cid, action)
+            else:
+                send_data_to_ws(client, action)
         elif action == "setvolume":
             send_data_to_ws(
                 client=client,
@@ -236,6 +369,41 @@ def main(page: ft.Page):
         page.update()
 
     clients_list = ft.Column()
+    sync_col = ft.Column(
+        [
+            ft.Card(
+                ft.Container(
+                    ft.Column(
+                        controls=[
+                            ft.Row(
+                                [
+                                    ft.Icon(ft.icons.MULTITRACK_AUDIO, ),
+                                    ft.Container(ft.Text("Синхронный", size=20, weight=ft.FontWeight.W_300), expand=True),
+                                    ft.IconButton(ft.icons.FOLDER_OPEN, on_click=select_folder, data="all")
+                                ]
+                            ),
+                            ft.Row(
+                                controls=[
+                                    ft.IconButton(ft.icons.SKIP_PREVIOUS, icon_size=45, tooltip="Предыдущий трек", data=f"prevtrack_all_-1", on_click=send_action),
+                                    ft.IconButton(ft.icons.PLAY_ARROW, icon_size=45, tooltip="Продолжить", data=f"play_all_-1",
+                                                  on_click=send_action),
+                                    ft.IconButton(ft.icons.PAUSE, icon_size=45, tooltip="Пауза", data=f"pause_all_-1", on_click=send_action),
+                                    ft.IconButton(ft.icons.SKIP_NEXT, icon_size=45, tooltip="Следующий трек", data=f"nexttrack_all_-1", on_click=send_action)
+                                ],
+                                alignment=ft.MainAxisAlignment.CENTER
+                            )
+                        ],
+                        # height=250,
+                        width=600
+                    ),
+                    # padding=15
+                    padding=15
+                ),
+                elevation=5,
+                data="all"
+            )
+        ]
+    )
 
     def change_screen(target: str, value=None):
         page.controls.clear()
@@ -256,6 +424,7 @@ def main(page: ft.Page):
 
         elif target == "main":
             clients_list.controls.clear()
+
             for index, c in enumerate(clients_indexation.items()):
                 client = c[1]
 
@@ -274,7 +443,7 @@ def main(page: ft.Page):
                                     [
                                         ft.Icon(client['icon'], color=color),
                                         ft.Container(ft.Text(client['title'], size=20, weight=ft.FontWeight.W_300), expand=True),
-                                        ft.IconButton(ft.icons.FOLDER_OPEN, on_click=goto_pick_folder, data=client['name'])
+                                        ft.IconButton(ft.icons.FOLDER_OPEN, on_click=select_folder, data=client['name'])
                                     ]
                                 ),
                                 ft.Row(
@@ -322,7 +491,12 @@ def main(page: ft.Page):
                 )
                 clients_list.controls.append(client_card)
             # close_dialog(dialog_loading)
-            page.add(clients_list)
+            page.controls = [
+                sync_col,
+                clients_list
+            ]
+            page.update()
+            # page.add(clients_list)
 
         elif target == "schedule":
             config = load_config()
@@ -334,7 +508,10 @@ def main(page: ft.Page):
                 },
                 'pause': {
                     'title': "Выключние"
-                }
+                },
+                'play_track': {
+                    'title': "Трек"
+                },
             }
 
             sources = {
@@ -389,51 +566,22 @@ def main(page: ft.Page):
                     )
                 page.add(col)
             else:
-                page.add(ft.Text("Список расписания пуст", size=18, weight=ft.FontWeight.W_400))
-        elif target == "settings":
-            pass
-        elif target == "pick_folder":
-            client_id = value
-            loading_text.value = "Загрузка"
-            open_dialog(dialog_loading)
-
-            listdir = get_yadisk_listdir()
-
-            if listdir is not None:
-                col = ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER)
-                col.controls.append(ft.Text('Выберите папку с музыкой', size=18, weight=ft.FontWeight.W_200))
-                listdir = [dir for dir in listdir if ".txt" not in dir['name']]
-                for dir in listdir:
-                    col.controls.append(
-                        ft.Card(
-                            ft.Container(
-                                content=ft.Row(
-                                    [
-                                        ft.Container(ft.Text(dir['name'], size=18), expand=True),
-                                        ft.IconButton(ft.icons.ARROW_FORWARD_IOS, on_click=send_new_path, data={'client_id': client_id, 'path': dir['name']})
-                                    ]
-                                ),
-                                padding=15
-                            ),
-                            elevation=5,
-                            width=600
-                        )
-                    )
-                page.add(col)
-            else:
-                open_sb("Ошибка при получении данных", ft.colors.RED)
-            close_dialog(dialog_loading)
+                page.add(ft.Text("В расписании ничего нет", size=16, weight=ft.FontWeight.W_200))
 
         elif target == "edit_timer":
             config = load_config()
             schedule = config['schedule']
             cur_timer = schedule[value]
 
-            for loc in cur_timer['sources']:
-                for location in timer_locations.controls:
+            for location in timer_locations.controls:
+                if location.controls[0].data in cur_timer['sources']:
+                    location.controls[0].value = True
+                else:
                     location.controls[0].value = False
-                    if loc == location.controls[0].data:
-                        location.controls[0].value = True
+
+            if cur_timer['action'] == "play_track":
+                timer_action_select_track_btn.visible = True
+                timer_action_select_track_btn.text = cur_timer['file']
 
             timer_action_dd.value = cur_timer['action']
             h, m = "0" * (2 - len(str(cur_timer['time']['hour']))) + f"{cur_timer['time']['hour']}", "0" * (2 - len(str(cur_timer['time']['min']))) + f"{cur_timer['time']['min']}"
@@ -463,7 +611,7 @@ def main(page: ft.Page):
                                 [
                                     ft.Column(
                                         [
-                                            ft.Text("Действие", size=18, weight=ft.FontWeight.W_400), timer_action_dd
+                                            ft.Text("Действие", size=18, weight=ft.FontWeight.W_400), timer_action_dd, timer_action_select_track_btn
                                         ]
                                     )
                                 ]
@@ -496,8 +644,11 @@ def main(page: ft.Page):
             )
 
             page.add(col)
+
         elif target == "new_timer":
             timer_action_dd.value = None
+            timer_action_select_track_btn.visible = False
+            timer_action_select_track_btn.text = "Выбрать трек"
             timer_time_btn.content.value = "нажмите для выбора"
             for loc in timer_locations.controls:
                 loc.controls[0].value = False
@@ -519,7 +670,7 @@ def main(page: ft.Page):
                         ft.Container(
                             content=ft.Column(
                                 [
-                                    ft.Text("Действие", size=18, weight=ft.FontWeight.W_400), timer_action_dd
+                                    ft.Text("Действие", size=18, weight=ft.FontWeight.W_400), timer_action_dd, timer_action_select_track_btn
                                 ],
                                 width=600
                             ),
@@ -560,12 +711,17 @@ def main(page: ft.Page):
         elif timer_action_dd.value == "pause":
             job = scheduler.add_job(stop_music, 'cron', hour=timer_datepicker.value.hour, minute=timer_datepicker.value.minute)
 
+        elif timer_action_dd.value == "play_track":
+            job = scheduler.add_job(play_track, 'cron', hour=timer_datepicker.value.hour, minute=timer_datepicker.value.minute)
+
         data = {
             "time": {
                 "hour": timer_datepicker.value.hour,
                 "min": timer_datepicker.value.minute
             },
             "action": timer_action_dd.value,
+            "path": timer_action_select_track_btn.data['path'],
+            "file": timer_action_select_track_btn.data['file'],
             "active": True,
             "sources": sources,
             "job_id": job.id
@@ -603,6 +759,9 @@ def main(page: ft.Page):
         elif timer_action_dd.value == "pause":
             job = scheduler.add_job(stop_music, 'cron', hour=cur_timer['time']['hour'], minute=cur_timer['time']['min'])
 
+        elif timer_action_dd.value == "play_track":
+            job = scheduler.add_job(play_track, 'cron', hour=cur_timer['time']['hour'], minute=cur_timer['time']['min'])
+
         cur_timer['job_id'] = job.id
         scheduler.print_jobs()
         schedule[timer_index] = cur_timer
@@ -614,6 +773,7 @@ def main(page: ft.Page):
 
     def send_new_path(e: ft.ControlEvent):
         data = e.control.data
+
         client_id, path = data['client_id'], data['path']
         loading_text.value = "Отправка"
         open_dialog(dialog_loading)
@@ -623,8 +783,10 @@ def main(page: ft.Page):
                     client=cid,
                     action="simplesync",
                     params={
+                        'type': data['type'],
                         'path': path,
-                        'time': time.time() + 3
+                        'file': data['file'],
+                        'time': time.time() + 5
                     }
                 )
             open_sb("Запуск синхронизации")
@@ -633,7 +795,9 @@ def main(page: ft.Page):
                 client=client_id,
                 action="setdir",
                 params={
-                    'path': path
+                    'type': data['type'],
+                    'path': path,
+                    'file': data['file']
                 }
             )
         close_dialog(dialog_loading)
@@ -644,6 +808,15 @@ def main(page: ft.Page):
         hour = "0" * (2 - len(str(time.hour))) + f"{time.hour}"
         minute = "0" * (2 - len(str(time.minute))) + f"{time.minute}"
         timer_time_btn.content.value = f"{hour}:{minute}"
+        page.update()
+
+    def check_timer_action_dd(e: ft.ControlEvent):
+        action = e.control.value
+        print(action)
+        if action == "play_track":
+            timer_action_select_track_btn.visible = True
+        else:
+            timer_action_select_track_btn.visible = False
         page.update()
 
     timer_datepicker = ft.TimePicker(
@@ -658,11 +831,21 @@ def main(page: ft.Page):
     timer_time_btn = ft.TextButton(on_click=lambda _: timer_datepicker.pick_time(), content=ft.Text('нажмите для выбора', size=18))
     timer_action_dd = ft.Dropdown(
         options=[
-            ft.dropdown.Option(text="Включить", key="play"),
-            ft.dropdown.Option(text="Выключить", key="pause")
+            ft.dropdown.Option(text="Воспроизведение", key="play"),
+            ft.dropdown.Option(text="Пауза", key="pause"),
+            ft.dropdown.Option(text="Включение трека", key="play_track")
         ],
         hint_text="Выберите действие",
-        width=200
+        width=200,
+        on_change=check_timer_action_dd
+    )
+    timer_action_select_track_btn = ft.FilledTonalButton(
+        text="Выбрать трек",
+        icon=ft.icons.AUDIO_FILE,
+        on_click=select_folder,
+        data="for_timer",
+        width=200,
+        visible=False
     )
     timer_locations = ft.Column(
         [
@@ -733,10 +916,9 @@ def main(page: ft.Page):
             if minutes != 0:
                 time += f"{minutes} мин."
 
-            open_sb(f"Таймер включен\nСработает через {time}", ft.colors.GREEN)
+            open_sb(f"Таймер сработает через {time}", ft.colors.GREEN)
         else:
             scheduler.pause_job(job_id)
-
             open_sb("Таймер выключен")
         scheduler.print_jobs()
 
@@ -749,20 +931,50 @@ def main(page: ft.Page):
         content = ft.Text(text, size=18, text_align=ft.TextAlign.START, weight=ft.FontWeight.W_300, color=text_color)
         page.snack_bar = ft.SnackBar(
             content=content,
-            duration=1200,
+            duration=1500,
             bgcolor=bgcolor
         )
         page.snack_bar.open = True
         page.update()
 
+    def open_banner(text: str, bgcolor=ft.colors.WHITE):
+        if bgcolor != ft.colors.WHITE:
+            text_color = ft.colors.WHITE
+        else:
+            text_color = ft.colors.BLACK
+
+        content = ft.Text(text, size=18, text_align=ft.TextAlign.START, weight=ft.FontWeight.W_300, color=text_color)
+        page.banner = ft.Banner(
+            bgcolor=bgcolor,
+            content=content,
+            actions=[
+                ft.IconButton(ft.icons.CLOSE, on_click=lambda _:page.close_banner())
+            ]
+        )
+        page.banner.open = True
+        page.update()
+
     def goto_edittimer(e: ft.ControlEvent):
         change_screen("edit_timer", e.control.data)
 
+    bs_pick_music_content = ft.Column()
+    bs_pick_music_progress = ft.ProgressBar()
+    bs_pick_music = ft.BottomSheet(
+        content=ft.Column(
+            [
+                bs_pick_music_progress,
+                bs_pick_music_content
+            ],
+            width=600,
+            height=600,
+            scroll=ft.ScrollMode.HIDDEN
+        ),
+        is_scroll_controlled=False,
+        show_drag_handle=True
+    )
+
     loading_text = ft.Text("Загрузка", size=20, weight=ft.FontWeight.W_400)
     dialog_loading = ft.AlertDialog(
-        # Диалог с кольцом загрузки
-
-        # title=ft.Text(size=20),
         modal=True,
         content=ft.Column(
             controls=[
@@ -788,6 +1000,10 @@ def main(page: ft.Page):
         dialog.open = False
         page.update()
 
+    def close_bottom_sheet(bs: ft.BottomSheet):
+        bs.open = False
+        page.update()
+
     def send_data_to_ws(client: str, action: str, params=None):
         data = {
             "sender": "server",
@@ -800,9 +1016,11 @@ def main(page: ft.Page):
 
         try:
             ws.send(data)
+            logging.info(f"WebSocket: sended {data}")
             return True
-        except ConnectionRefusedError:
+        except Exception as e:
             open_sb("Веб-сокет недоступен", ft.colors.RED)
+            logging.error(f"WebSocket: error while sending data: {e}")
             return False
 
     login_field = ft.TextField(
@@ -834,12 +1052,12 @@ def main(page: ft.Page):
         title=ft.Row(
             [
                 ft.Container(ft.Text("Веб-сокет", size=20, weight=ft.FontWeight.W_400), expand=True),
-                # ft.IconButton(ft.icons.CLOSE_ROUNDED, on_click=lambda _: close_dialog(dialog_info))
             ]
         )
     )
 
     def on_message_recieved(message: str):
+        logging.info(f"WebSocket: recieved {message}")
         data = json.loads(message)
 
         for index, c in enumerate(clients_indexation.items()):
@@ -881,13 +1099,15 @@ def main(page: ft.Page):
 
     def recieve_messages():
         while True:
-            data = ws.recv()
-            on_message_recieved(data)
-            page.update()
+            try:
+                data = ws.recv()
+                on_message_recieved(data)
+            except Exception as e:
+                open_sb("Ошибка веб-сокета", ft.colors.RED)
+                logging.error(f"WebSocket: error while recieving: {e}")
 
     if ws_status['status']:
         change_screen('login')
-        page.run_thread(recieve_messages)
     else:
         dialog_info.content = ft.Text(f"Не удалось подключиться к веб-сокету. Перезагрузите его через Коннект и попробуйте ещё раз.\n\nОшибка: {ws_status['error']}", size=17)
         open_dialog(dialog_info)
