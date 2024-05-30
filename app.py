@@ -362,6 +362,7 @@ def main(page: ft.Page):
                             'time': time.time() + 3
                         }
                     )
+                open_sb("Действие выполняется")
             else:
                 send_data_to_ws(client, action)
         elif action == "setvolume":
@@ -498,14 +499,11 @@ def main(page: ft.Page):
                 )
                 clients_list.controls.append(client_card)
             # close_dialog(dialog_loading)
-            page.controls = [
-                sync_col,
-                clients_list
-            ]
-            page.update()
-            # page.add(clients_list)
+            page.add(sync_col)
+            page.add(clients_list)
 
         elif target == "schedule":
+            print('ok')
             config = load_config()
             schedule = config['schedule']
 
@@ -528,6 +526,7 @@ def main(page: ft.Page):
             }
 
             if len(schedule) > 0:
+                print('ok1')
                 col = ft.Column()
                 for index, el in enumerate(schedule):
                     h, m = "0" * (2 - len(str(el['time']['hour']))) + f"{el['time']['hour']}", "0" * (2 - len(str(el['time']['min']))) + f"{el['time']['min']}"
@@ -571,7 +570,9 @@ def main(page: ft.Page):
                             width=600
                         )
                     )
+                print(len(col.controls))
                 page.add(col)
+                page.update()
             else:
                 page.add(ft.Text("В расписании ничего нет", size=16, weight=ft.FontWeight.W_200))
 
@@ -797,7 +798,7 @@ def main(page: ft.Page):
                         'time': time.time() + 3
                     }
                 )
-            open_sb("Запуск синхронизации")
+            open_sb("Ожидание синхронизации")
         else:
             send_data_to_ws(
                 client=client_id,

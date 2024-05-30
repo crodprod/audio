@@ -144,12 +144,11 @@ def make_action(data: dict):
             make_action({'message': 'nexttrack', 'track': data['file']})
 
     elif data['message'] == "simplesync":
-        print('OKOKOKOK')
         params = data['body']
 
         delay = params['time'] - time.time()
         if delay > 0:
-            time.sleep(delay + 0.6)
+            time.sleep(delay)
 
         # action = params['action']
         make_action(params)
@@ -212,9 +211,7 @@ def make_action(data: dict):
         )
 
     elif data['message'] == 'nexttrack':
-        print('ok1')
         if current_directory:
-            print('ok2')
             status = 'ok'
             if playlist:
                 playlist = [el for el in os.listdir(current_directory) if el.endswith('.mp3')]
@@ -231,7 +228,6 @@ def make_action(data: dict):
                         break
 
             else:
-                print('ok3')
                 playlist = [el for el in os.listdir(current_directory) if el.endswith('.mp3')]
                 if 'track' in data.keys() and data['track']:
                     current_filename = data['track']
