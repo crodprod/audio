@@ -786,7 +786,7 @@ def main(page: ft.Page):
                         'type': data['type'],
                         'path': path,
                         'file': data['file'],
-                        'time': time.time() + 5
+                        'time': time.time() + 3
                     }
                 )
             open_sb("Запуск синхронизации")
