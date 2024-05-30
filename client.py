@@ -137,14 +137,17 @@ def make_action(data: dict):
         update_config(config)
         print(f'Новая директория: {current_directory}')
 
-        if data['message'] == 'setdir':
-            make_action({'message': 'nexttrack'})
-
-        elif data['message'] == "simplesync":
+        if data['message'] == "simplesync":
             delay = data['body']['time'] - time.time()
             if delay > 0:
                 time.sleep(delay)
-            make_action({'message': 'nexttrack'})
+
+        if data['body']['type'] == "folder":
+            print('Запуск папки')
+            make_action({'message': 'nexttrack', 'track': None})
+        elif data['body']['type'] == "file":
+            print('Запуск файла')
+            make_action({'message': 'nexttrack', 'track': data['body']['file']})
 
     elif data['message'] == "getinfo":
         ws_send(
@@ -204,7 +207,9 @@ def make_action(data: dict):
         )
 
     elif data['message'] == 'nexttrack':
+        print('ok1')
         if current_directory:
+            print('ok2')
             status = 'ok'
             if playlist:
                 playlist = [el for el in os.listdir(current_directory) if el.endswith('.mp3')]
@@ -219,10 +224,15 @@ def make_action(data: dict):
                         mixer.music.play()
                         pause = False
                         break
+
             else:
+                print('ok3')
                 playlist = [el for el in os.listdir(current_directory) if el.endswith('.mp3')]
-                current_filename = playlist[0]
-                mixer.music.load(os.path.join(current_directory, playlist[0]))
+                if data['track']:
+                    current_filename = data['track']
+                else:
+                    current_filename = playlist[0]
+                mixer.music.load(os.path.join(current_directory, current_filename))
                 mixer.music.play()
                 pause = False
         else:
