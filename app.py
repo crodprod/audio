@@ -354,7 +354,14 @@ def main(page: ft.Page):
         if action in ['play', 'pause', 'prevtrack', 'nexttrack']:
             if client == "all":
                 for cid in ['sumstage', 'territory', 'conference']:
-                    send_data_to_ws(cid, action)
+                    send_data_to_ws(
+                        client=cid,
+                        action="simplesync",
+                        params={
+                            'message': action,
+                            'time': time.time() + 3
+                        }
+                    )
             else:
                 send_data_to_ws(client, action)
         elif action == "setvolume":
@@ -783,6 +790,7 @@ def main(page: ft.Page):
                     client=cid,
                     action="simplesync",
                     params={
+                        'message': "setdir",
                         'type': data['type'],
                         'path': path,
                         'file': data['file'],

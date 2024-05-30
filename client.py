@@ -130,34 +130,29 @@ def make_action(data: dict):
 
     if data['message'] == "setdir":
         playlist = []
-        current_directory = f"{root_directory}\\{data['body']['path']}"
+        current_directory = f"{root_directory}\\{data['path']}"
         config = get_config()
-        config['curdir'] = f"{root_directory}\\{data['body']['path']}"
+        config['curdir'] = f"{root_directory}\\{data['path']}"
         update_config(config)
         print(f'Новая директория: {current_directory}')
 
-        # if data['message'] == "simplesync":
-        #     delay = data['body']['time'] - time.time()
-        #     print(delay)
-        #     if delay > 0:
-        #         time.sleep(delay + 0.6)
-
-        if data['body']['type'] == "folder":
+        if data['type'] == "folder":
             print('Запуск папки')
             make_action({'message': 'nexttrack', 'track': None})
-        elif data['body']['type'] == "file":
+        elif data['type'] == "file":
             print('Запуск файла')
-            make_action({'message': 'nexttrack', 'track': data['body']['file']})
+            make_action({'message': 'nexttrack', 'track': data['file']})
 
     elif data['message'] == "simplesync":
+        print('OKOKOKOK')
         params = data['body']
 
         delay = params['time'] - time.time()
         if delay > 0:
             time.sleep(delay + 0.6)
 
-        action = params['action']
-        make_action({'message': action, 'track': data['body']['file']})
+        # action = params['action']
+        make_action(params)
 
     elif data['message'] == "getinfo":
         ws_send(
