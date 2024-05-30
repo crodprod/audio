@@ -139,6 +139,7 @@ def make_action(data: dict):
 
         if data['message'] == "simplesync":
             delay = data['body']['time'] - time.time()
+            print(delay)
             if delay > 0:
                 time.sleep(delay)
 
@@ -228,7 +229,7 @@ def make_action(data: dict):
             else:
                 print('ok3')
                 playlist = [el for el in os.listdir(current_directory) if el.endswith('.mp3')]
-                if data['track']:
+                if 'track' in data.keys() and data['track']:
                     current_filename = data['track']
                 else:
                     current_filename = playlist[0]
@@ -415,7 +416,7 @@ else:
                           "\n>> ")
 
 print(f"Выбран клиент: {clients[int(client_id)]}")
-# sync_time()
+sync_time()
 receive_messages()
 
 ws.close()
