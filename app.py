@@ -29,13 +29,6 @@ logging.basicConfig(level=logging.INFO,
 
 os.environ['FLET_WEB_APP_PATH'] = '/audio'
 
-try:
-    ws = connect(ws_source, open_timeout=3, close_timeout=3)
-    ws_status['status'] = True
-except Exception as e:
-    ws_status['status'] = False
-    ws_status['error'] = e
-
 scheduler = BackgroundScheduler()
 
 
@@ -78,17 +71,22 @@ def get_yadisk_listdir(path: str = ""):
         return None
 
 
-def send_ws_data(client: str, action: str, params=None):
+def schedule_send_ws(client: str, action: str, params=None):
     data = {
         "sender": "server",
         "recipient": client,
         'message': action,
         'body': params
     }
-
     data = json.dumps(data)
-    ws.send(data)
-    logging.info(f"WebSocket: sended {data}")
+
+    try:
+        ws = connect(ws_source, open_timeout=3, close_timeout=3)
+        ws.send(data)
+        ws.close()
+        logging.info(f"WebSocket: schedule sended (message: {data})")
+    except Exception as e:
+        logging.info(f"error: {e} (message: {data})")
 
 
 def play_music():
@@ -98,7 +96,7 @@ def play_music():
         hour, minute = time.hour, time.minute
         if el['time']['hour'] == hour and el['time']['min'] == minute:
             for source in el['sources']:
-                send_ws_data(source, 'nexttrack')
+                schedule_send_ws(source, 'nexttrack')
 
 
 def stop_music():
@@ -108,7 +106,7 @@ def stop_music():
         hour, minute = time.hour, time.minute
         if el['time']['hour'] == hour and el['time']['min'] == minute:
             for source in el['sources']:
-                send_ws_data(source, 'pause')
+                schedule_send_ws(source, 'pause')
 
 
 def play_track():
@@ -119,8 +117,7 @@ def play_track():
         if el['time']['hour'] == hour and el['time']['min'] == minute:
             print(el)
             for source in el['sources']:
-                send_ws_data(source, 'pause')
-                send_ws_data(
+                schedule_send_ws(
                     client=source,
                     action="setdir",
                     params={
@@ -204,6 +201,13 @@ def main(page: ft.Page):
     page.appbar = ft.AppBar(
         title=ft.Text("Audio", size=20, weight=ft.FontWeight.W_400)
     )
+
+    try:
+        ws = connect(ws_source, open_timeout=3, close_timeout=3)
+        ws_status['status'] = True
+    except Exception as e:
+        ws_status['status'] = False
+        ws_status['error'] = str(e)
 
     def login():
         true_password = os.getenv('AUDIO_ACCESS_CODE')
@@ -540,7 +544,7 @@ def main(page: ft.Page):
                                                 ft.Container(
                                                     content=ft.ListTile(
                                                         title=ft.Text(f"{h}:{m}", size=18, weight=ft.FontWeight.W_400),
-                                                        subtitle=ft.Text(action[el['action']]['title'], size=18)
+                                                        subtitle=ft.Text(action[el['action']]['title'], size=18, weight=ft.FontWeight.W_200)
                                                     ),
                                                     expand=True,
                                                     padding=ft.padding.only(left=-15)
@@ -570,7 +574,6 @@ def main(page: ft.Page):
                             width=600
                         )
                     )
-                print(len(col.controls))
                 page.add(col)
                 page.update()
             else:
@@ -821,7 +824,6 @@ def main(page: ft.Page):
 
     def check_timer_action_dd(e: ft.ControlEvent):
         action = e.control.value
-        print(action)
         if action == "play_track":
             timer_action_select_track_btn.visible = True
         else:
@@ -957,7 +959,7 @@ def main(page: ft.Page):
             bgcolor=bgcolor,
             content=content,
             actions=[
-                ft.IconButton(ft.icons.CLOSE, on_click=lambda _:page.close_banner())
+                ft.IconButton(ft.icons.CLOSE, on_click=lambda _: page.close_banner())
             ]
         )
         page.banner.open = True
@@ -1130,8 +1132,8 @@ if __name__ == '__main__':
         ft.app(
             target=main,
             assets_dir='assets',
-            # port=8502,
-            # view=ft.AppView.WEB_BROWSER
+            port=8502,
+            view=ft.AppView.WEB_BROWSER
         )
     elif platform.system() == "Linux":
         ft.app(

@@ -121,14 +121,17 @@ def ws_recieve():
         return False
 
 
-def make_action(data: dict):
+def on_message_recieved(message: dict):
     global playlist
     global pause
     global global_last_volume  # храним в джейсоне
     global current_directory  # храним в джейсоне
     global current_filename
 
-    if data['message'] == "setdir":
+    action = message['message']
+    data = message['body']
+
+    if action == "setdir":
         playlist = []
         current_directory = f"{root_directory}\\{data['path']}"
         config = get_config()
@@ -136,24 +139,16 @@ def make_action(data: dict):
         update_config(config)
         print(f'Новая директория: {current_directory}')
 
-        if data['type'] == "folder":
-            print('Запуск папки')
-            make_action({'message': 'nexttrack', 'track': None})
-        elif data['type'] == "file":
-            print('Запуск файла')
-            make_action({'message': 'nexttrack', 'track': data['file']})
+        on_message_recieved({'message': 'nexttrack', 'body': {'track': data['file']}})
 
-    elif data['message'] == "simplesync":
-        params = data['body']
-
-        delay = params['time'] - time.time()
+    elif action == "simplesync":
+        delay = data['time'] - time.time()
         if delay > 0:
             time.sleep(delay)
 
-        # action = params['action']
-        make_action(params)
+        on_message_recieved(data)
 
-    elif data['message'] == "getinfo":
+    elif action == "getinfo":
         ws_send(
             message='getinfo_answer',
             body={
@@ -164,7 +159,7 @@ def make_action(data: dict):
             }
         )
 
-    elif data['message'] == "pause":
+    elif action == "pause":
         pause = True
         mixer.music.pause()
         print("Пауза")
@@ -175,7 +170,7 @@ def make_action(data: dict):
             }
         )
 
-    elif data['message'] == "play":
+    elif action == "play":
         if current_directory:
             status = 'ok'
             pause = False
@@ -193,9 +188,8 @@ def make_action(data: dict):
                 'msuic_status': mixer.music.get_busy()
             }
         )
-
-    elif data['message'] == "setvolume":
-        vol = data['body']['volume']
+    elif action == "setvolume":
+        vol = data['volume']
         mixer.music.set_volume(float(vol))
 
         config = get_config()
@@ -210,7 +204,7 @@ def make_action(data: dict):
             }
         )
 
-    elif data['message'] == 'nexttrack':
+    elif action == "nexttrack":
         if current_directory:
             status = 'ok'
             if playlist:
@@ -248,7 +242,7 @@ def make_action(data: dict):
             }
         )
 
-    elif data['message'] == "prevtrack":
+    elif action == "prevtrack":
         if current_directory:
             status = 'ok'
             if playlist:
@@ -282,9 +276,12 @@ def make_action(data: dict):
             }
         )
 
+    else:
+        print(f"Входящее сообщение не обработано: {message}")
+
 
 def receive_messages():
-    make_action({'message': 'getinfo'})
+    on_message_recieved({'message': 'getinfo', 'body': None})
     print("Клиент запущен. Ожидание команды от Audio...")
     global global_client_id
     while True:
@@ -293,7 +290,7 @@ def receive_messages():
             data = json.loads(msg)
             if data['recipient'] == clients[int(client_id)]['id']:
                 print(f">>> {data}")
-                make_action(data)
+                on_message_recieved(data)
         else:
             reboot()
 
@@ -400,7 +397,7 @@ if config['autorestart']:
     client_id = config['client_id']
     config['autorestart'] = False
     update_config(config)
-    make_action({'action': 'nexttrack', 'params': None})
+    on_message_recieved({'message': 'nexttrack', 'body': None})
 else:
     client_id = input(
         "\nВведите ID клиента:"
