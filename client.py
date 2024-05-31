@@ -43,7 +43,6 @@ connected = False
 while not connected:
     try:
         print(color_text("Соединение с веб-сокетом...", Back.YELLOW))
-        # print(Back.YELLOW + "\nПопытка подключения к вебсокету...")
         ws = connect(ws_source, open_timeout=3, close_timeout=3)
         print(color_text("Соединение с веб-сокетом установлено", Back.GREEN) + "\n")
         connected = True
