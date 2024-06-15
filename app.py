@@ -3,9 +3,11 @@ import json
 import logging
 import os
 import platform
+import random
 import time
 import flet as ft
 import ntplib
+import websockets.exceptions
 
 from requests import get
 from dotenv import load_dotenv
@@ -14,12 +16,15 @@ from websockets.sync.client import connect
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from elements.screens import screens_data
+import yadiskapi
 
 if platform.system() == "Windows":
     env_path = r"D:\CROD_MEDIA\.env"
 else:
     env_path = r"/root/crod/.env"
 load_dotenv(dotenv_path=env_path)
+
+os.environ['FLET_SESSION_TIMEOUT'] = '1'
 
 ws_status = {'status': False, 'error': ""}
 ws_source = "wss://quick-reasonably-alien.ngrok-free.app"
@@ -209,6 +214,8 @@ def main(page: ft.Page):
         ws_status['status'] = False
         ws_status['error'] = str(e)
 
+    reconnect_fl = False
+
     def login():
         true_password = os.getenv('AUDIO_ACCESS_CODE')
         if login_field.value == true_password:
@@ -329,7 +336,7 @@ def main(page: ft.Page):
             ft.Container(
                 ft.Row(
                     [
-                        ft.IconButton(ft.icons.MULTITRACK_AUDIO, on_click=select_folder, data='all', tooltip="Синхронизация"),
+                        ft.IconButton(ft.icons.UPLOAD_FILE, on_click=lambda _: open_filepicker(), tooltip="Загрузить трек"),
                         ft.IconButton(ft.icons.RESTART_ALT, on_click=lambda _: change_screen("main"), tooltip="Обновить"),
                         ft.IconButton(icon=ft.icons.SCHEDULE, on_click=lambda _: change_screen('schedule'), tooltip="Расписание"),
                     ]
@@ -416,6 +423,53 @@ def main(page: ft.Page):
             )
         ]
     )
+
+    def upload_track_to_disk(filename):
+
+        yandex = yadiskapi.YandexAPI(os.getenv('YANDEX_REST_URL'), os.getenv('YANDEX_REST_TOKEN'))
+        response = yandex.get_upload_link(f'CROD_MEDIA/Общие файлы/Audio/Загрузки/{filename}')
+
+        if 'href' in response.keys():
+            yandex.upload_file(
+                url=response['href'],
+                filepath=f"assets/uploads/{filename}"
+            )
+
+        else:
+            text = f"*Статус:* ⛔ не создан" \
+                   f"\n*Ошибка:* {response['message']}"
+
+    def upload_track(e):
+        if music_filepicker.result is not None and music_filepicker.result.files is not None:
+            file = music_filepicker.result.files[0]
+            upload_list = [
+                ft.FilePickerUploadFile(
+                    name=file.name,
+                    upload_url=page.get_upload_url(file.name, 600),
+                )
+            ]
+
+            loading_text.value = "Загружаем файл"
+            open_dialog(dialog_loading)
+
+            music_filepicker.upload(upload_list)
+            time.sleep(1)
+
+            close_dialog(dialog_loading)
+            open_sb("Файл загружен", ft.colors.GREEN)
+            upload_track_to_disk(file.name)
+
+        else:
+            open_sb("Загрузка отменена")
+
+    music_filepicker = ft.FilePicker(on_result=upload_track)
+    page.overlay.append(music_filepicker)
+
+    def open_filepicker():
+        music_filepicker.pick_files(
+            allow_multiple=False,
+            file_type=ft.FilePickerFileType.AUDIO
+        )
 
     def change_screen(target: str, value=None):
         page.controls.clear()
@@ -505,6 +559,7 @@ def main(page: ft.Page):
             # close_dialog(dialog_loading)
             page.add(sync_col)
             page.add(clients_list)
+
 
         elif target == "schedule":
             print('ok')
@@ -954,7 +1009,7 @@ def main(page: ft.Page):
         else:
             text_color = ft.colors.BLACK
 
-        content = ft.Text(text, size=18, text_align=ft.TextAlign.START, weight=ft.FontWeight.W_300, color=text_color)
+        content = ft.Text(text, size=18, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.W_300, color=text_color)
         page.banner = ft.Banner(
             bgcolor=bgcolor,
             content=content,
@@ -1113,16 +1168,27 @@ def main(page: ft.Page):
             try:
                 data = ws.recv()
                 on_message_recieved(data)
+            except websockets.exceptions.ConnectionClosedError:
+                    open_banner("Потеряно соединение с веб-сокетом. Восстановите соединение и перезагрузите Audio", ft.colors.RED)
+                    break
             except Exception as e:
                 open_sb("Ошибка веб-сокета", ft.colors.RED)
                 logging.error(f"WebSocket: error while recieving: {e}")
+
+    def reconnect_to_ws():
+        while True:
+            try:
+                ws = connect(ws_source, open_timeout=3, close_timeout=3)
+                return ws
+            except Exception:
+                return None
 
     if ws_status['status']:
         change_screen('login')
     else:
         dialog_info.content = ft.Text(f"Не удалось подключиться к веб-сокету. Перезагрузите его через Коннект и попробуйте ещё раз.\n\nОшибка: {ws_status['error']}", size=17)
         open_dialog(dialog_info)
-
+    os.environ["FLET_SECRET_KEY"] = os.urandom(12).hex()
 
 create_schedule()
 
@@ -1132,6 +1198,7 @@ if __name__ == '__main__':
         ft.app(
             target=main,
             assets_dir='assets',
+            upload_dir='assets/uploads',
             port=8502,
             view=ft.AppView.WEB_BROWSER
         )
@@ -1139,6 +1206,7 @@ if __name__ == '__main__':
         ft.app(
             target=main,
             assets_dir='assets',
+            upload_dir='assets/uploads',
             name='',
             port=8011
         )
